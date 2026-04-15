@@ -1,0 +1,49 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm:*)",
+      "Bash(npx:*)",
+      "Bash(node:*)",
+      "Bash(git status)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git branch:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git checkout:*)",
+      "Bash(git stash:*)",
+      "Bash(firebase deploy:*)",
+      "Bash(firebase functions:log:*)",
+      "Bash(firebase emulators:*)",
+      "Bash(firebase use:*)",
+      "Bash(firebase projects:list)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(find:*)",
+      "Bash(pwd)",
+      "Bash(tree:*)",
+      "Read(//**)",
+      "Edit(//**)",
+      "Write(//**)"
+    ],
+    "deny": [
+      "Bash(rm -rf:*)",
+      "Bash(git push --force:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(firebase firestore:delete:*)",
+      "Bash(gcloud:*)",
+      "Bash(curl:* | sh)",
+      "Bash(curl:* | bash)",
+      "Bash(sudo:*)"
+    ],
+    "ask": [
+      "Bash(git push:*)",
+      "Bash(rm:*)",
+      "Bash(firebase deploy --only firestore:rules)",
+      "Bash(firebase functions:delete:*)",
+      "Bash(npm publish:*)"
+    ]
+  }
+}

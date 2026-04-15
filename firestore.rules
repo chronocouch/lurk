@@ -1,0 +1,64 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Users collection ──
+    // Each user can only read/write their own document
+    match /users/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if false; // Only Cloud Functions write here
+    }
+
+    // ── Factions ──
+    match /factions/{factionId} {
+
+      // Internal config (API keys, owner info) — NEVER readable by clients
+      match /internal/{doc} {
+        allow read, write: if false; // Cloud Functions only
+      }
+
+      // Snapshots — not directly readable by clients (too much data)
+      // The aggregated patterns are what the frontend reads
+      match /snapshots/{snapshotId} {
+        allow read, write: if false; // Cloud Functions only
+      }
+
+      // Aggregated patterns — readable by faction members
+      match /aggregated/{docId} {
+        allow read: if request.auth != null && isFactionMember(factionId);
+        allow write: if false; // Cloud Functions only
+      }
+
+      // Member info — readable by faction members
+      match /members/{memberId} {
+        allow read: if request.auth != null && isFactionMember(factionId);
+        allow write: if false; // Cloud Functions only
+      }
+
+      // War tracking — readable by faction members
+      // Owner can write the config doc to start/stop tracking.
+      // All other docs (status, events, opponent_activity_*) are
+      // written by Cloud Functions only.
+      match /war_tracking/{docId} {
+        allow read: if request.auth != null && isFactionMember(factionId);
+        allow write: if request.auth != null
+          && isFactionOwner(factionId)
+          && docId == 'config';
+      }
+    }
+
+    // ── Helper functions ──
+
+    // Check if the authenticated user belongs to a faction
+    function isFactionMember(factionId) {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.factionId == factionId;
+    }
+
+    // Check if the authenticated user is the faction owner
+    function isFactionOwner(factionId) {
+      let userData = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return userData.factionId == factionId && userData.role == 'owner';
+    }
+  }
+}
