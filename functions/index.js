@@ -53,9 +53,44 @@ const YATA_COUNTRY = {
   swi: "Switzerland",    jap: "Japan",          chi: "China",
   uae: "UAE",            sou: "South Africa",
 };
-const TRAVEL_MARKET_HIST_CAP = 336; // ~7 days at 30-min cadence (favorites)
-const BOARD_HIST_CAP = 64;          // ~32h at 30-min cadence (full board — kept small
+const TRAVEL_MARKET_HIST_CAP = 672; // ~7 days at 15-min cadence (favorites)
+const BOARD_HIST_CAP = 96;          // ~24h at 15-min cadence (full board — kept small
                                     // so the all-items history doc stays well under 1MB)
+
+// Depletion + restock flow from a qty/cost history series. Sampling is
+// coarse (15 min), so these are NET rates over observed intervals, not a
+// perfect gross consumption model — good enough to size a fly window and
+// they sharpen as history accrues.
+function computeFlowStats(hist) {
+  if (!Array.isArray(hist) || hist.length < 3) {
+    return { depletionPerMin: 0, restockIntervalMin: 0, restockSize: 0, restockCount: 0, flowSamples: hist ? hist.length : 0 };
+  }
+  let depSum = 0, depN = 0;
+  const restockTimes = [], restockSizes = [];
+  for (let i = 1; i < hist.length; i++) {
+    const a = hist[i - 1], b = hist[i];
+    const dtMin = (b.t - a.t) / 60;
+    if (dtMin <= 0) continue;
+    const dq = (b.q || 0) - (a.q || 0);
+    if (dq < 0) { depSum += (-dq) / dtMin; depN++; }
+    else if (dq > 0) { restockTimes.push(b.t); restockSizes.push(dq); }
+  }
+  let restockIntervalMin = 0;
+  if (restockTimes.length >= 2) {
+    let gaps = 0;
+    for (let i = 1; i < restockTimes.length; i++) gaps += restockTimes[i] - restockTimes[i - 1];
+    restockIntervalMin = Math.round(gaps / (restockTimes.length - 1) / 60);
+  }
+  const restockSize = restockSizes.length
+    ? Math.round(restockSizes.reduce((a, b) => a + b, 0) / restockSizes.length) : 0;
+  return {
+    depletionPerMin: depN ? Math.round(depSum / depN) : 0,
+    restockIntervalMin,
+    restockSize,
+    restockCount: restockSizes.length,
+    flowSamples: hist.length,
+  };
+}
 
 // Cost stats over a watched item's price history.
 function computeCostStats(hist) {
@@ -1056,7 +1091,7 @@ exports.aggregatePatterns = onSchedule(
 // ══════════════════════════════════════════════════════════════
 exports.collectTravelMarket = onSchedule(
   {
-    schedule: "every 30 minutes",
+    schedule: "every 15 minutes",
     timeZone: "UTC",
     retryCount: 1,
     memory: "256MiB",
@@ -1142,6 +1177,7 @@ exports.collectTravelMarket = onSchedule(
       newHist[id] = h;
 
       const st = computeCostStats(h);
+      const flow = computeFlowStats(h);
       // "Becoming valuable" = margin (market_value − foreign cost) trending up.
       const marginNow = mv && loc.cost ? mv - loc.cost : 0;
       const ref = h.find((p) => (now - p.t) >= 24 * 3600) || h[0];
@@ -1163,6 +1199,9 @@ exports.collectTravelMarket = onSchedule(
         inStockRate: st.inStockRate,
         samples: st.samples,
         marginTrendPct,
+        depletionPerMin: flow.depletionPerMin,
+        restockIntervalMin: flow.restockIntervalMin,
+        restockSize: flow.restockSize,
       };
     }
 

@@ -933,7 +933,18 @@ function flCompute(){
     if(!precise)tier='est';
     else{tier='building';if(samples>=6){const v=it.volatilityPct||0;tier=v<5?'high':v<12?'medium':'low'}}
     if(stale)tier='stale';
-    rows.push({id,name:b.name||id,country,cost,qty,mv,trend,sellBz,sellIm,dump,effSell,margin,rtMin,expPerMin,signal,tier,precise,isFav,samples,volatilityPct:rel.volatilityPct||0,costLow:rel.costLow||0,costMedian:rel.costMedian||0,inStockRate:rel.inStockRate,updated,stale,cap});
+    // Fly window: will stock survive the OUTBOUND flight?
+    const depletionPerMin=b.depletionPerMin||0,restockIntervalMin=b.restockIntervalMin||0,restockSize=b.restockSize||0;
+    const flightOutMin=rtMin!=null?rtMin/2:null;
+    const timeToEmpty=(depletionPerMin>0&&qty>0)?qty/depletionPerMin:null;
+    const latestDep=(timeToEmpty!=null&&flightOutMin!=null)?timeToEmpty-flightOutMin:null;
+    let windowState;
+    if(flightOutMin==null||(b.samples||0)<3)windowState='unknown';
+    else if(depletionPerMin<=0||timeToEmpty==null)windowState='stable';
+    else if(latestDep>20)windowState='safe';
+    else if(latestDep>0)windowState='tight';
+    else windowState='risky';
+    rows.push({id,name:b.name||id,country,cost,qty,mv,trend,sellBz,sellIm,dump,effSell,margin,rtMin,expPerMin,signal,tier,precise,isFav,samples,volatilityPct:rel.volatilityPct||0,costLow:rel.costLow||0,costMedian:rel.costMedian||0,inStockRate:rel.inStockRate,updated,stale,cap,depletionPerMin,restockIntervalMin,restockSize,flightOutMin,timeToEmpty,latestDep,windowState});
   }
   return rows;
 }
@@ -942,6 +953,24 @@ const FL_SIG={go:{cls:'go',icon:'🟢',label:'Leave now'},wait:{cls:'wait',icon:
 const FL_TIER={high:'High confidence',medium:'Medium confidence',low:'Low confidence',building:'Building history',est:'Est. price',stale:'Stale stock'};
 function flTrendHtml(t){if(t>3)return`<span class="fl-trend up">▲ ${t}%</span>`;if(t<-3)return`<span class="fl-trend down">▼ ${Math.abs(t)}%</span>`;return`<span class="fl-trend flat">–</span>`}
 function flSortMetric(r,s){if(s==='margin')return r.margin;if(s==='trend')return r.trend;if(s==='stock')return r.qty;return r.expPerMin==null?-1e18:r.expPerMin}
+const FL_TRAVEL_URL='https://www.torn.com/travelagency.php';
+function flFlyLink(r,big){return`<a class="fl-fly${big?' big':''}" href="${FL_TRAVEL_URL}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Open Torn travel agency${r.country?' to fly to '+r.country:''}">✈ Fly</a>`}
+function flDur(m){if(m==null)return'—';if(m>=120)return(m/60).toFixed(1)+'h';return Math.round(m)+'m'}
+function flWindowPill(r){
+  const w=r.windowState;
+  if(w==='safe')return`<span class="fl-win safe" title="Stock should outlast your outbound flight">🟢<span class="fl-win-txt"> fly ≤${Math.round(r.latestDep)}m</span></span>`;
+  if(w==='tight')return`<span class="fl-win tight" title="Stock runs out around when you'd land">🟡<span class="fl-win-txt"> ~${Math.round(r.latestDep)}m</span></span>`;
+  if(w==='risky')return`<span class="fl-win risky" title="Likely empty on arrival">🔴<span class="fl-win-txt"> empty risk</span></span>`;
+  if(w==='stable')return`<span class="fl-win stable" title="Stock isn't depleting">🟢<span class="fl-win-txt"> stable</span></span>`;
+  return`<span class="fl-win unknown" title="Not enough history yet">·</span>`;
+}
+function flWindowNote(r){
+  if(r.windowState==='safe')return`Leave within ~${Math.round(r.latestDep)}m and you'll still land with stock.`;
+  if(r.windowState==='tight')return`Cutting it close — stock runs out around when you'd land.`;
+  if(r.windowState==='risky')return r.restockIntervalMin?`Likely empty on arrival. Restocks ~every ${r.restockIntervalMin}m (+${r.restockSize.toLocaleString()}); time your landing just after.`:`Likely empty on arrival — depletes before you land.`;
+  if(r.windowState==='stable')return`Stock isn't meaningfully depleting.`;
+  return`Not enough history yet to size a window.`;
+}
 
 function flRender(){
   const table=document.getElementById('fl-table');if(!table)return;
@@ -960,7 +989,7 @@ function flRender(){
   // Focus: best 'go' trips, favorites first, top 4
   const focus=rows.filter(r=>r.signal==='go'&&r.expPerMin>0).sort((a,b)=>{if(a.isFav!==b.isFav)return a.isFav?-1:1;return b.expPerMin-a.expPerMin}).slice(0,4);
   const fs=document.getElementById('fl-focus-section'),fg=document.getElementById('fl-focus-grid');
-  if(focus.length){fs.style.display='';fg.innerHTML=focus.map(r=>`<div class="fl-focus-card"><div class="fl-focus-top"><span class="fl-focus-item">${r.isFav?'⭐ ':''}${r.name}</span><span class="fl-focus-country">${r.country||'?'}</span></div><div class="fl-focus-rate">${flMoney(r.expPerMin)}<span>/min</span></div><div class="fl-focus-sub">${flMoney(r.margin)}/ea${r.precise?'':' est'} · ${Math.round(r.rtMin)}m round trip</div></div>`).join('')}
+  if(focus.length){fs.style.display='';fg.innerHTML=focus.map(r=>`<div class="fl-focus-card"><div class="fl-focus-top"><span class="fl-focus-item">${r.isFav?'⭐ ':''}${r.name}</span><span class="fl-focus-country">${r.country||'?'}</span></div><div class="fl-focus-rate">${flMoney(r.expPerMin)}<span>/min</span></div><div class="fl-focus-sub">${flMoney(r.margin)}/ea${r.precise?'':' est'} · ${Math.round(r.rtMin)}m round trip</div><div class="fl-focus-foot">${flWindowPill(r)}${flFlyLink(r,false)}</div></div>`).join('')}
   else{fs.style.display='none'}
   // Country filter chips
   const countrySet=[...new Set(rows.map(r=>r.country).filter(Boolean))].sort();
@@ -974,7 +1003,7 @@ function flRender(){
   table.innerHTML=view.length?view.map(flRowHtml).join(''):'<div class="state-banner"><p>No items match your filter.</p></div>';
   // Disclaimer
   const noFav=flConfig.favorites.length===0;
-  let dis='Expected $/min = margin × capacity × in-stock rate ÷ round-trip minutes. Non-starred rows use Torn market value as an estimated sell price.';
+  let dis='Expected $/min = margin × capacity × in-stock rate ÷ round-trip minutes. Non-starred rows use Torn market value as an estimated sell price. Fly window compares net depletion vs. your outbound flight time — it\'s coarse for fast-moving items and sharpens as history builds.';
   if(noFav)dis+=' ⭐ Star the items you actually fly to get precise bazaar/item-market pricing and reliability scoring.';
   document.getElementById('fl-disclaimer').textContent=dis;
 }
@@ -993,10 +1022,15 @@ function flRowHtml(r){
     <div class="fl-dt"><span>Cost low / median</span><b>${r.costLow?flMoney(r.costLow):'—'} / ${r.costMedian?flMoney(r.costMedian):'—'}</b></div>
     ${sellLine}
     <div class="fl-dt"><span>Value trend (24h)</span><b>${flTrendHtml(r.trend)}</b></div>
+    <div class="fl-dt"><span>Depletion</span><b>${r.depletionPerMin?r.depletionPerMin.toLocaleString()+'/min':'stable'}</b></div>
+    <div class="fl-dt"><span>Sells out in</span><b>${flDur(r.timeToEmpty)}</b></div>
+    <div class="fl-dt"><span>Restock</span><b>${r.restockIntervalMin?'~every '+r.restockIntervalMin+'m (+'+r.restockSize.toLocaleString()+')':'—'}</b></div>
     <div class="fl-dt"><span>Stock now</span><b>${(r.qty||0).toLocaleString()} ${r.qty<r.cap?'⚠ under capacity':''}</b></div>
     <div class="fl-dt"><span>${relLabel}</span><b>${r.inStockRate!=null?Math.round(r.inStockRate*100)+'%':'—'} / ${r.volatilityPct?r.volatilityPct+'%':'—'}</b></div>
-    <div class="fl-dt"><span>Round trip (${flConfig.method})</span><b>${r.rtMin?Math.round(r.rtMin)+' min':'—'}</b></div>
-    <div class="fl-dt"><span>Data freshness</span><b>${r.updated?timeAgo(r.updated):'—'} ${r.stale?'⚠ stale':''}</b></div>
+    <div class="fl-dt"><span>Outbound flight (${flConfig.method})</span><b>${r.flightOutMin?Math.round(r.flightOutMin)+'m each way':'—'}</b></div>
+    <div class="fl-dt"><span>Price confidence</span><b>${FL_TIER[r.tier]||'—'}</b></div>
+    <div class="fl-dt fl-win-note"><span>Fly window</span><b>${flWindowNote(r)}</b></div>
+    <div class="fl-detail-actions">${flFlyLink(r,true)}</div>
   </div>`:'';
   return `<div class="fl-row sig-${sig.cls}${open?' open':''}${r.isFav?' fav':''}">
     <button class="fl-star${r.isFav?' on':''}" onclick="flToggleFav('${r.id}',event)" title="${r.isFav?'Unfavorite':'Favorite'}">${r.isFav?'★':'☆'}</button>
@@ -1004,9 +1038,9 @@ function flRowHtml(r){
       <div class="fl-row-main">
         <span class="fl-sig" title="${sig.label}">${sig.icon}</span>
         <div class="fl-row-id"><span class="fl-item">${r.name}</span><span class="fl-country">${r.country||'unknown'}</span></div>
-        <div class="fl-row-nums"><span class="fl-rate">${rate}</span><span class="fl-margin">${marginTxt}</span></div>
-        ${flTrendHtml(r.trend)}
-        <span class="fl-tier tier-${r.tier}">${FL_TIER[r.tier]||''}</span>
+        <div class="fl-row-nums"><span class="fl-rate">${rate}</span><span class="fl-margin">${marginTxt} ${Math.abs(r.trend)>3?flTrendHtml(r.trend):''}</span></div>
+        ${flWindowPill(r)}
+        ${flFlyLink(r,false)}
       </div>${detail}
     </div>
   </div>`;
