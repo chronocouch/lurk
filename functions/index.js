@@ -747,15 +747,23 @@ async function pollOpponents(factionRef, apiKey, opponentFactionId, now) {
     let travelState = "in_torn";
     let destination = null;
 
-    if (statusDesc.startsWith("Traveling to ")) {
-      travelState = "traveling_out";
-      destination = statusDesc.replace("Traveling to ", "");
-    } else if (statusDesc.startsWith("Returning to Torn")) {
-      travelState = "returning";
-      destination = prev.lastKnownDestination || null;
-    } else if (statusDesc.startsWith("In ") && statusState === "Abroad") {
+    if (statusState === "Traveling") {
+      // Torn phrases the return leg as "Returning to Torn from X" or
+      // "Traveling from X to Torn"; outbound is "Traveling to X".
+      const headingToTorn = /to torn/i.test(statusDesc) || /^returning/i.test(statusDesc);
+      if (headingToTorn) {
+        travelState = "returning";
+        const m = statusDesc.match(/from (.+?)(?: to torn)?$/i);
+        destination = (m && m[1].trim()) || prev.lastKnownDestination || null;
+      } else {
+        travelState = "traveling_out";
+        destination = statusDesc.replace(/^traveling to /i, "").trim();
+      }
+    } else if (statusState === "Abroad") {
       travelState = "abroad";
-      destination = statusDesc.replace("In ", "");
+      destination = statusDesc.startsWith("In ")
+        ? statusDesc.replace("In ", "")
+        : prev.lastKnownDestination || null;
     } else if (statusState === "Hospital" || statusDesc.includes("hospital")) {
       travelState = "hospital";
     } else if (statusState === "Jail" || statusDesc.includes("jail")) {

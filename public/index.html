@@ -625,7 +625,7 @@ window.wbStartTracking=async function(){
 window.wbStopTracking=async function(){
   if(!firebaseReady||!userFactionId)return;
   await _fb.setDoc(_fb.doc(db,'factions/'+userFactionId+'/war_tracking','config'),{active:false,opponentFactionId:null,stoppedAt:Math.floor(Date.now()/1000)});
-  wbTrackingActive=false;wbOpponents={};wbUpdateUI();wbRenderOpponents();wbRenderSummary();
+  wbTrackingActive=false;wbOpponents={};wbOpponentFactionName='';wbLastPoll=0;wbUpdateUI();wbSyncBadge(false);wbRenderMeta(null);wbRenderOpponents();wbRenderSummary();
   if(wbUnsubStatus){wbUnsubStatus();wbUnsubStatus=null}if(wbUnsubEvents){wbUnsubEvents();wbUnsubEvents=null}
 };
 function wbSubscribe(){
