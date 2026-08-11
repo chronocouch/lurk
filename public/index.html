@@ -265,7 +265,7 @@
     <div class="content-frame" id="tab-flights">
       <div class="fl-header">
         <h2>Flights: Where Do I Fly Now?</h2>
-        <p class="fl-subtitle">Ranked by expected profit per minute, using live foreign cost (YATA) vs. Torn market sell prices.</p>
+        <p class="fl-subtitle">Every foreign item, ranked by expected profit per minute. Star the ones you fly to pin them and get precise pricing. Trend shows what's becoming valuable.</p>
       </div>
 
       <div class="hm-meta-bar" id="fl-meta-bar"></div>
@@ -298,30 +298,31 @@
         </div>
       </div>
 
-      <!-- Watchlist manager -->
-      <div class="fl-watchlist-bar">
-        <div class="control-group fl-add-group">
-          <label>Add item to watchlist</label>
-          <div class="fl-add-row">
-            <input type="text" id="fl-add-input" list="fl-item-list" placeholder="Search foreign items…" autocomplete="off">
-            <datalist id="fl-item-list"></datalist>
-            <button class="btn btn-secondary" onclick="flAddItem()">Add</button>
-          </div>
-        </div>
-        <div class="fl-chips" id="fl-chips"></div>
-      </div>
-
       <!-- Focus shortlist -->
       <div class="fl-focus-section" id="fl-focus-section" style="display:none">
         <div class="section-label">⭐ Focus — your best trips right now</div>
         <div class="fl-focus-grid" id="fl-focus-grid"></div>
       </div>
 
-      <!-- Ranked table -->
+      <!-- Board controls: search + country filter + sort -->
+      <div class="fl-board-controls">
+        <input type="text" id="fl-search" class="fl-search" placeholder="🔍 Search items…" autocomplete="off" oninput="flRender()">
+        <div class="fl-country-chips" id="fl-country-chips"></div>
+        <div class="control-group fl-sort-group">
+          <label>Sort</label>
+          <select id="fl-sort" onchange="flRender()">
+            <option value="permin">Expected $/min</option>
+            <option value="margin">Margin / item</option>
+            <option value="trend">Becoming valuable</option>
+            <option value="stock">Stock available</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Opportunity board -->
       <div class="fl-table-section">
-        <div class="section-label">All trips <span class="fl-hint">tap a row for detail</span></div>
         <div class="fl-table" id="fl-table">
-          <div class="state-banner"><h3>No items on your watchlist</h3><p>Add the items you fly for (e.g. Xanax) above to see ranked trips.</p></div>
+          <div class="state-banner"><h3>Foreign market data loading…</h3><p>The board populates on the first collector run (~30 min after deploy).</p></div>
         </div>
       </div>
 
@@ -404,8 +405,8 @@ let wbActiveFilter=null;       // 'okay' | 'returning' | 'traveling_out' | 'abro
 let wbImminentOppId=null;      // currently most-imminent returning opponent
 let intelOffset=0,intelCollapsed=false;
 // ─── Flight planner state ───
-let flConfig={items:[],capacity:15,method:'standard',feePct:5,sellPref:'mid'};
-let flMarket={},flItems={},flUnsubCurrent=null,flUnsubItems=null,flUnsubConfig=null,flExpanded={};
+let flConfig={favorites:[],capacity:15,method:'standard',feePct:5,sellPref:'mid'};
+let flBoard={},flBoardMeta={},flItems={},flUnsubBoard=null,flUnsubItems=null,flUnsubConfig=null,flExpanded={},flCountryFilter='all';
 // One-way standard flight times in seconds (mirror of functions/index.js FLIGHT_TIMES).
 const FL_TIMES={"Mexico":1560,"Canada":2220,"Cayman Islands":3420,"Hawaii":7260,"United Kingdom":9120,"Switzerland":10140,"Argentina":11340,"Japan":12180,"China":13140,"UAE":15540,"South Africa":18660};
 const FL_METHOD_MULT={standard:1,airstrip:0.70,wlt:0.50};
@@ -439,7 +440,7 @@ window.createAccountWithEmail=async function(){
 window.signOut=async function(){
   if(wbUnsubStatus){wbUnsubStatus();wbUnsubStatus=null}
   if(wbUnsubEvents){wbUnsubEvents();wbUnsubEvents=null}
-  if(flUnsubCurrent){flUnsubCurrent();flUnsubCurrent=null}
+  if(flUnsubBoard){flUnsubBoard();flUnsubBoard=null}
   if(flUnsubItems){flUnsubItems();flUnsubItems=null}
   if(flUnsubConfig){flUnsubConfig();flUnsubConfig=null}
   closeProfileMenu();
@@ -855,169 +856,161 @@ function wbStartTicker(){
 }
 
 // ═══ FLIGHT PLANNER ═══
-// "Where do I fly now?" — ranks watchlist trips by expected profit/min
-// using live foreign cost (YATA, via travel_market/current) vs. Torn
-// market sell prices + reliability stats (travel_market/items).
+// A discovery board of EVERY foreign item, ranked by expected profit/min.
+// Sources: travel_market/board (all items: cost, stock, market-value sell,
+// value trend) + travel_market/items (precise sell + reliability for the
+// user's favorites) + flight_planner/config (favorites + planner settings).
 
 function flMoney(n){n=Math.round(n||0);const neg=n<0;n=Math.abs(n);let s;if(n>=1e9)s='$'+(n/1e9).toFixed(2)+'b';else if(n>=1e6)s='$'+(n/1e6).toFixed(2)+'m';else if(n>=1e3)s='$'+(n/1e3).toFixed(n>=1e5?0:1)+'k';else s='$'+n;return(neg?'-':'')+s}
 
 function initFlights(){
   if(!firebaseReady||!userFactionId)return;
-  if(flUnsubCurrent)flUnsubCurrent();if(flUnsubItems)flUnsubItems();if(flUnsubConfig)flUnsubConfig();
-  flUnsubCurrent=_fb.onSnapshot(_fb.doc(db,'travel_market','current'),s=>{flMarket=s.exists()?s.data():{};flBuildItemList();flRender()});
+  if(flUnsubBoard)flUnsubBoard();if(flUnsubItems)flUnsubItems();if(flUnsubConfig)flUnsubConfig();
+  flUnsubBoard=_fb.onSnapshot(_fb.doc(db,'travel_market','board'),s=>{flBoard=s.exists()?s.data():{};flRender()});
   flUnsubItems=_fb.onSnapshot(_fb.doc(db,'travel_market','items'),s=>{flItems=s.exists()?(s.data().items||{}):{};flRender()});
   flUnsubConfig=_fb.onSnapshot(_fb.doc(db,'factions/'+userFactionId+'/flight_planner','config'),s=>{if(s.exists())flApplyConfig(s.data());flRender()});
 }
 
 function flApplyConfig(d){
-  flConfig={items:Array.isArray(d.items)?d.items:[],capacity:d.capacity||15,method:d.method||'standard',feePct:d.feePct!=null?d.feePct:5,sellPref:d.sellPref||'mid'};
+  flConfig={favorites:Array.isArray(d.favorites)?d.favorites.map(Number):[],capacity:d.capacity||15,method:d.method||'standard',feePct:d.feePct!=null?d.feePct:5,sellPref:d.sellPref||'mid'};
   document.getElementById('fl-capacity').value=flConfig.capacity;
   document.getElementById('fl-method').value=flConfig.method;
   document.getElementById('fl-fee').value=flConfig.feePct;
   document.getElementById('fl-sellpref').value=flConfig.sellPref;
 }
 
-window.flSaveConfig=async function(){
+async function flPersist(){
+  if(!firebaseReady||!userFactionId)return;
+  try{await _fb.setDoc(_fb.doc(db,'factions/'+userFactionId+'/flight_planner','config'),{favorites:flConfig.favorites,capacity:flConfig.capacity,method:flConfig.method,feePct:flConfig.feePct,sellPref:flConfig.sellPref,active:true,updatedAt:Math.floor(Date.now()/1000)})}
+  catch(e){console.error('flight config save failed',e)}
+}
+window.flSaveConfig=function(){
   flConfig.capacity=Math.max(1,Math.min(30,parseInt(document.getElementById('fl-capacity').value)||15));
   flConfig.method=document.getElementById('fl-method').value;
   flConfig.feePct=Math.max(0,Math.min(30,parseFloat(document.getElementById('fl-fee').value)||0));
   flConfig.sellPref=document.getElementById('fl-sellpref').value;
-  flRender();
-  if(!firebaseReady||!userFactionId)return;
-  try{await _fb.setDoc(_fb.doc(db,'factions/'+userFactionId+'/flight_planner','config'),{items:flConfig.items,capacity:flConfig.capacity,method:flConfig.method,feePct:flConfig.feePct,sellPref:flConfig.sellPref,active:true,updatedAt:Math.floor(Date.now()/1000)})}
-  catch(e){console.error('flight config save failed',e)}
+  flRender();flPersist();
 };
-
-// Build a name→{id,country} index + the <datalist> of foreign items.
-let flNameIndex={};
-function flBuildItemList(){
-  flNameIndex={};const dl=document.getElementById('fl-item-list');if(!dl)return;
-  const seen=new Set(flConfig.items.map(i=>String(i.id)));const opts=[];
-  const countries=flMarket.countries||{};
-  Object.values(countries).forEach(c=>{Object.entries(c.items||{}).forEach(([id,it])=>{
-    flNameIndex[(it.name||'').toLowerCase()]={id,name:it.name,country:c.name};
-    if(!seen.has(String(id)))opts.push('<option value="'+(it.name||'').replace(/"/g,'&quot;')+'">'+c.name+'</option>');
-  })});
-  dl.innerHTML=opts.join('');
-}
-
-window.flAddItem=function(){
-  const inp=document.getElementById('fl-add-input');const raw=(inp.value||'').trim();if(!raw)return;
-  let found=flNameIndex[raw.toLowerCase()];
-  if(!found&&/^\d+$/.test(raw)){for(const v of Object.values(flNameIndex)){if(String(v.id)===raw){found=v;break}}}
-  if(!found){alert('Item not found in foreign stock. Pick one from the list, or wait for the next stock refresh.');return}
-  if(flConfig.items.some(i=>String(i.id)===String(found.id))){inp.value='';return}
-  flConfig.items.push({id:parseInt(found.id),name:found.name});inp.value='';
-  flBuildItemList();flSaveConfig();
+window.flToggleFav=function(id,ev){
+  if(ev)ev.stopPropagation();id=Number(id);
+  const i=flConfig.favorites.indexOf(id);
+  if(i>=0)flConfig.favorites.splice(i,1);else flConfig.favorites.push(id);
+  flRender();flPersist();
 };
-window.flRemoveItem=function(id){
-  flConfig.items=flConfig.items.filter(i=>String(i.id)!==String(id));
-  flBuildItemList();flSaveConfig();
-};
+window.flSetCountry=function(c){flCountryFilter=c;flRender()};
+window.flToggleRow=function(id){flExpanded[id]=!flExpanded[id];flRender()};
 
-// Compute a ranked trip row for each watched item.
+// Compute a ranked row for every foreign item on the board.
 function flCompute(){
-  const now=Math.floor(Date.now()/1000);const cap=flConfig.capacity,mult=FL_METHOD_MULT[flConfig.method]||1;
-  const feeMult=1-(flConfig.feePct/100);
-  const rows=[];
-  for(const w of flConfig.items){
-    const id=String(w.id);const it=flItems[id]||{};
-    // Prefer live YATA cost/qty from travel_market/current; fall back to stats doc.
-    let cost=it.cost||0,qty=it.qty||0,country=it.country||null,updated=it.updated||0;
-    const countries=flMarket.countries||{};
-    for(const c of Object.values(countries)){const m=(c.items||{})[id];if(m){cost=m.cost||cost;qty=m.qty!=null?m.qty:qty;country=c.name;updated=c.update||updated;break}}
+  const now=Math.floor(Date.now()/1000),cap=flConfig.capacity,mult=FL_METHOD_MULT[flConfig.method]||1;
+  const feeMult=1-(flConfig.feePct/100);const favSet=new Set(flConfig.favorites.map(String));
+  const items=flBoard.items||{};const rows=[];
+  for(const [id,b] of Object.entries(items)){
+    const isFav=favSet.has(id);const it=isFav?(flItems[id]||{}):{};
+    const cost=b.cost||0,qty=b.qty||0,country=b.country||null,updated=b.updated||0,mv=b.marketValue||0,trend=b.marginTrendPct||0;
     const oneway=country?FL_TIMES[country]:null;
-    const sellBz=it.sellBazaar||0,sellIm=it.sellItemMarket||0;
-    const dump=sellIm?sellIm*feeMult:0;
-    let effSell=0;
-    if(flConfig.sellPref==='low')effSell=dump||sellBz;
-    else if(flConfig.sellPref==='high')effSell=sellBz||dump;
-    else effSell=(dump&&sellBz)?(dump+sellBz)/2:(dump||sellBz);
+    // Sell price: favorites use the precise bazaar/item-market band; others use market_value (est).
+    let precise=false,sellBz=0,sellIm=0,dump=0,effSell=0;
+    if(isFav&&(it.sellBazaar||it.sellItemMarket)){
+      precise=true;sellBz=it.sellBazaar||0;sellIm=it.sellItemMarket||0;dump=sellIm?sellIm*feeMult:0;
+      if(flConfig.sellPref==='low')effSell=dump||sellBz;
+      else if(flConfig.sellPref==='high')effSell=sellBz||dump;
+      else effSell=(dump&&sellBz)?(dump+sellBz)/2:(dump||sellBz);
+    }else{effSell=mv}
     const margin=effSell&&cost?effSell-cost:0;
     const rtMin=oneway?(2*oneway*mult)/60:null;
-    const samples=it.samples||0;
-    const stockFactor=samples>=4?(it.inStockRate!=null?it.inStockRate:1):(qty>0?1:0);
+    const rel=precise?it:b;const samples=rel.samples||0;
+    const stockFactor=samples>=4?(rel.inStockRate!=null?rel.inStockRate:1):(qty>0?1:0);
     let expPerMin=null;
     if(rtMin&&effSell)expPerMin=(margin>0?margin*cap*stockFactor:margin*cap)/rtMin;
     const stale=updated?(now-updated)>6*3600:false;
-    const hasSell=!!(sellBz||sellIm);
-    // Signal
-    let signal='pending';
-    if(!hasSell||!cost)signal='pending';
+    let signal;
+    if(!effSell||!cost)signal='pending';
     else if(margin<=0||qty<cap)signal='skip';
-    else if(it.costMedian&&cost>it.costMedian*1.08)signal='wait';
+    else if(rel.costMedian&&cost>rel.costMedian*1.08)signal='wait';
     else signal='go';
-    // Reliability tier
-    let tier='building';
-    if(samples>=6){const v=it.volatilityPct||0;tier=v<5?'high':v<12?'medium':'low'}
+    let tier;
+    if(!precise)tier='est';
+    else{tier='building';if(samples>=6){const v=it.volatilityPct||0;tier=v<5?'high':v<12?'medium':'low'}}
     if(stale)tier='stale';
-    rows.push({id,name:it.name||w.name||id,country,cost,qty,sellBz,sellIm,dump,effSell,margin,rtMin,oneway,expPerMin,signal,tier,samples,volatilityPct:it.volatilityPct||0,costLow:it.costLow||0,costMedian:it.costMedian||0,inStockRate:it.inStockRate,updated,stale,cap});
+    rows.push({id,name:b.name||id,country,cost,qty,mv,trend,sellBz,sellIm,dump,effSell,margin,rtMin,expPerMin,signal,tier,precise,isFav,samples,volatilityPct:rel.volatilityPct||0,costLow:rel.costLow||0,costMedian:rel.costMedian||0,inStockRate:rel.inStockRate,updated,stale,cap});
   }
-  // Sort: rankable rows by expPerMin desc, pending/unrankable last.
-  rows.sort((a,b)=>{const av=a.expPerMin==null?-1e18:a.expPerMin,bv=b.expPerMin==null?-1e18:b.expPerMin;return bv-av});
   return rows;
 }
 
 const FL_SIG={go:{cls:'go',icon:'🟢',label:'Leave now'},wait:{cls:'wait',icon:'🟡',label:'Wait'},skip:{cls:'skip',icon:'🔴',label:'Skip'},pending:{cls:'pending',icon:'⚪',label:'No price yet'}};
-const FL_TIER={high:'High confidence',medium:'Medium confidence',low:'Low confidence',building:'Building history',stale:'Stale stock data'};
+const FL_TIER={high:'High confidence',medium:'Medium confidence',low:'Low confidence',building:'Building history',est:'Est. price',stale:'Stale stock'};
+function flTrendHtml(t){if(t>3)return`<span class="fl-trend up">▲ ${t}%</span>`;if(t<-3)return`<span class="fl-trend down">▼ ${Math.abs(t)}%</span>`;return`<span class="fl-trend flat">–</span>`}
+function flSortMetric(r,s){if(s==='margin')return r.margin;if(s==='trend')return r.trend;if(s==='stock')return r.qty;return r.expPerMin==null?-1e18:r.expPerMin}
 
 function flRender(){
   const table=document.getElementById('fl-table');if(!table)return;
-  // Meta bar
+  const items=flBoard.items||{};const nItems=Object.keys(items).length;
   const meta=document.getElementById('fl-meta-bar');
-  const yataAge=flMarket.lastPoll?timeAgo(flMarket.lastPoll):'—';
-  const sellAge=(flItems&&Object.keys(flItems).length)?'ok':'—';
-  meta.innerHTML=flConfig.items.length?`<div class="meta-item">Stock data <span class="meta-value">${yataAge}</span></div><div class="meta-item">Watchlist <span class="meta-value">${flConfig.items.length} items</span></div><div class="meta-item">Capacity <span class="meta-value">${flConfig.capacity}</span></div>`:'';
-  // Chips
-  const chips=document.getElementById('fl-chips');
-  chips.innerHTML=flConfig.items.map(i=>`<span class="fl-chip">${i.name||i.id}<button onclick="flRemoveItem('${i.id}')" title="Remove">✕</button></span>`).join('');
-  // Empty state
-  if(!flConfig.items.length){
-    table.innerHTML='<div class="state-banner"><h3>No items on your watchlist</h3><p>Add the items you fly for (e.g. Xanax) above to see ranked trips.</p></div>';
+  meta.innerHTML=nItems?`<div class="meta-item">Board <span class="meta-value">${nItems} items</span></div><div class="meta-item">Updated <span class="meta-value">${flBoard.lastPoll?timeAgo(flBoard.lastPoll):'—'}</span></div><div class="meta-item">Favorites <span class="meta-value">${flConfig.favorites.length}</span></div><div class="meta-item">Capacity <span class="meta-value">${flConfig.capacity}</span></div>`:'';
+  // Loading / empty board
+  if(!nItems){
+    table.innerHTML='<div class="state-banner"><h3>Foreign market data loading…</h3><p>The board populates on the first collector run (~30 min after deploy).</p></div>';
     document.getElementById('fl-focus-section').style.display='none';
+    document.getElementById('fl-country-chips').innerHTML='';
     document.getElementById('fl-disclaimer').textContent='';
     return;
   }
   const rows=flCompute();
-  // Focus shortlist = green trips, top 4 by $/min
-  const focus=rows.filter(r=>r.signal==='go'&&r.expPerMin>0).slice(0,4);
+  // Focus: best 'go' trips, favorites first, top 4
+  const focus=rows.filter(r=>r.signal==='go'&&r.expPerMin>0).sort((a,b)=>{if(a.isFav!==b.isFav)return a.isFav?-1:1;return b.expPerMin-a.expPerMin}).slice(0,4);
   const fs=document.getElementById('fl-focus-section'),fg=document.getElementById('fl-focus-grid');
-  if(focus.length){fs.style.display='';fg.innerHTML=focus.map(r=>`<div class="fl-focus-card"><div class="fl-focus-top"><span class="fl-focus-item">${r.name}</span><span class="fl-focus-country">${r.country||'?'}</span></div><div class="fl-focus-rate">${flMoney(r.expPerMin)}<span>/min</span></div><div class="fl-focus-sub">${flMoney(r.margin)}/ea · ${Math.round(r.rtMin)}m round trip</div></div>`).join('')}
+  if(focus.length){fs.style.display='';fg.innerHTML=focus.map(r=>`<div class="fl-focus-card"><div class="fl-focus-top"><span class="fl-focus-item">${r.isFav?'⭐ ':''}${r.name}</span><span class="fl-focus-country">${r.country||'?'}</span></div><div class="fl-focus-rate">${flMoney(r.expPerMin)}<span>/min</span></div><div class="fl-focus-sub">${flMoney(r.margin)}/ea${r.precise?'':' est'} · ${Math.round(r.rtMin)}m round trip</div></div>`).join('')}
   else{fs.style.display='none'}
-  // Table
-  table.innerHTML=rows.map(r=>flRowHtml(r)).join('');
-  // Disclaimer about data maturity
-  const building=rows.filter(r=>r.tier==='building').length;
-  const noPrice=rows.filter(r=>r.signal==='pending').length;
-  let dis='Expected $/min = margin × capacity × in-stock rate ÷ round-trip minutes.';
-  if(noPrice)dis+=' Sell prices for '+noPrice+' item(s) arrive on the next 30-min refresh.';
-  if(building)dis+=' Reliability scores sharpen after ~1–2 weeks of history.';
+  // Country filter chips
+  const countrySet=[...new Set(rows.map(r=>r.country).filter(Boolean))].sort();
+  if(flCountryFilter!=='all'&&!countrySet.includes(flCountryFilter))flCountryFilter='all';
+  document.getElementById('fl-country-chips').innerHTML=['all',...countrySet].map(c=>`<button class="fl-cc${flCountryFilter===c?' on':''}" onclick="flSetCountry('${c}')">${c==='all'?'All':c}</button>`).join('');
+  // Filter + sort (favorites pinned to top)
+  const q=(document.getElementById('fl-search').value||'').trim().toLowerCase();
+  const sort=document.getElementById('fl-sort').value;
+  let view=rows.filter(r=>(flCountryFilter==='all'||r.country===flCountryFilter)&&(!q||String(r.name).toLowerCase().includes(q)));
+  view.sort((a,b)=>{if(a.isFav!==b.isFav)return a.isFav?-1:1;return flSortMetric(b,sort)-flSortMetric(a,sort)});
+  table.innerHTML=view.length?view.map(flRowHtml).join(''):'<div class="state-banner"><p>No items match your filter.</p></div>';
+  // Disclaimer
+  const noFav=flConfig.favorites.length===0;
+  let dis='Expected $/min = margin × capacity × in-stock rate ÷ round-trip minutes. Non-starred rows use Torn market value as an estimated sell price.';
+  if(noFav)dis+=' ⭐ Star the items you actually fly to get precise bazaar/item-market pricing and reliability scoring.';
   document.getElementById('fl-disclaimer').textContent=dis;
 }
 
 function flRowHtml(r){
   const sig=FL_SIG[r.signal]||FL_SIG.pending;const open=flExpanded[r.id];
   const rate=r.expPerMin!=null?flMoney(r.expPerMin)+'<span class="fl-permin">/min</span>':'—';
+  const marginTxt=r.effSell?flMoney(r.margin)+'/ea'+(r.precise?'':' <em>est</em>'):'no price';
   const costVs=r.costMedian?(r.cost<=r.costLow*1.02?'at low':r.cost<=r.costMedian?'below median':'above median'):'—';
+  const relLabel=r.precise?'In-stock / volatility (7d)':'In-stock / volatility (recent)';
+  const sellLine=r.precise
+    ?`<div class="fl-dt"><span>Sell band (mkt−fee ↔ bazaar)</span><b>${r.dump?flMoney(r.dump):'—'} ↔ ${r.sellBz?flMoney(r.sellBz):'—'}</b></div><div class="fl-dt"><span>Your effective sell</span><b>${r.effSell?flMoney(r.effSell):'—'}</b></div>`
+    :`<div class="fl-dt"><span>Sell (market value, est)</span><b>${r.mv?flMoney(r.mv):'—'}</b></div><div class="fl-dt fl-fav-hint"><span>Star to track</span><b>precise pricing + reliability</b></div>`;
   const detail=open?`<div class="fl-row-detail">
     <div class="fl-dt"><span>Buy (foreign)</span><b>${flMoney(r.cost)} <em>${costVs}</em></b></div>
-    <div class="fl-dt"><span>7d cost low / median</span><b>${r.costLow?flMoney(r.costLow):'—'} / ${r.costMedian?flMoney(r.costMedian):'—'}</b></div>
-    <div class="fl-dt"><span>Sell band (mkt−fee ↔ bazaar)</span><b>${r.dump?flMoney(r.dump):'—'} ↔ ${r.sellBz?flMoney(r.sellBz):'—'}</b></div>
-    <div class="fl-dt"><span>Your effective sell</span><b>${r.effSell?flMoney(r.effSell):'—'}</b></div>
-    <div class="fl-dt"><span>Stock now</span><b>${r.qty.toLocaleString()} ${r.qty<r.cap?'⚠ under capacity':''}</b></div>
-    <div class="fl-dt"><span>In-stock rate / volatility</span><b>${r.inStockRate!=null?Math.round(r.inStockRate*100)+'%':'—'} / ${r.volatilityPct?r.volatilityPct+'%':'—'}</b></div>
+    <div class="fl-dt"><span>Cost low / median</span><b>${r.costLow?flMoney(r.costLow):'—'} / ${r.costMedian?flMoney(r.costMedian):'—'}</b></div>
+    ${sellLine}
+    <div class="fl-dt"><span>Value trend (24h)</span><b>${flTrendHtml(r.trend)}</b></div>
+    <div class="fl-dt"><span>Stock now</span><b>${(r.qty||0).toLocaleString()} ${r.qty<r.cap?'⚠ under capacity':''}</b></div>
+    <div class="fl-dt"><span>${relLabel}</span><b>${r.inStockRate!=null?Math.round(r.inStockRate*100)+'%':'—'} / ${r.volatilityPct?r.volatilityPct+'%':'—'}</b></div>
     <div class="fl-dt"><span>Round trip (${flConfig.method})</span><b>${r.rtMin?Math.round(r.rtMin)+' min':'—'}</b></div>
     <div class="fl-dt"><span>Data freshness</span><b>${r.updated?timeAgo(r.updated):'—'} ${r.stale?'⚠ stale':''}</b></div>
   </div>`:'';
-  return `<div class="fl-row sig-${sig.cls}${open?' open':''}" onclick="flToggleRow('${r.id}')">
-    <div class="fl-row-main">
-      <span class="fl-sig" title="${sig.label}">${sig.icon}</span>
-      <div class="fl-row-id"><span class="fl-item">${r.name}</span><span class="fl-country">${r.country||'unknown'}</span></div>
-      <div class="fl-row-nums"><span class="fl-rate">${rate}</span><span class="fl-margin">${r.effSell?flMoney(r.margin)+'/ea':'no price'}</span></div>
-      <span class="fl-tier tier-${r.tier}">${FL_TIER[r.tier]||''}</span>
-    </div>${detail}</div>`;
+  return `<div class="fl-row sig-${sig.cls}${open?' open':''}${r.isFav?' fav':''}">
+    <button class="fl-star${r.isFav?' on':''}" onclick="flToggleFav('${r.id}',event)" title="${r.isFav?'Unfavorite':'Favorite'}">${r.isFav?'★':'☆'}</button>
+    <div class="fl-row-body" onclick="flToggleRow('${r.id}')">
+      <div class="fl-row-main">
+        <span class="fl-sig" title="${sig.label}">${sig.icon}</span>
+        <div class="fl-row-id"><span class="fl-item">${r.name}</span><span class="fl-country">${r.country||'unknown'}</span></div>
+        <div class="fl-row-nums"><span class="fl-rate">${rate}</span><span class="fl-margin">${marginTxt}</span></div>
+        ${flTrendHtml(r.trend)}
+        <span class="fl-tier tier-${r.tier}">${FL_TIER[r.tier]||''}</span>
+      </div>${detail}
+    </div>
+  </div>`;
 }
-window.flToggleRow=function(id){flExpanded[id]=!flExpanded[id];flRender()};
 
 // ═══ WAR INTEL ═══
 // Compares our wartime heatmap with opponent activity to find

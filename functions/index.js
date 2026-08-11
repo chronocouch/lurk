@@ -53,7 +53,9 @@ const YATA_COUNTRY = {
   swi: "Switzerland",    jap: "Japan",          chi: "China",
   uae: "UAE",            sou: "South Africa",
 };
-const TRAVEL_MARKET_HIST_CAP = 336; // ~7 days at a 30-minute cadence
+const TRAVEL_MARKET_HIST_CAP = 336; // ~7 days at 30-min cadence (favorites)
+const BOARD_HIST_CAP = 64;          // ~32h at 30-min cadence (full board — kept small
+                                    // so the all-items history doc stays well under 1MB)
 
 // Cost stats over a watched item's price history.
 function computeCostStats(hist) {
@@ -1042,9 +1044,13 @@ exports.aggregatePatterns = onSchedule(
 
 // ══════════════════════════════════════════════════════════════
 //  FLIGHT PLANNER COLLECTOR — runs every 30 minutes
-//  Pulls YATA foreign stock/cost (global) + Torn market sell prices
-//  for every item on any faction's watchlist, and snapshots history
-//  so the "where do I fly now" ranker can score reliability over time.
+//  Builds a full "opportunity board" of every foreign item so a flyer
+//  can discover what's becoming valuable — not just a hand-picked list.
+//
+//   • YATA export           → foreign cost + stock for ALL items (global)
+//   • torn/items (1 call)    → market_value baseline sell price for ALL items
+//   • market/{id} per fav    → precise bazaar/item-market sell + 7d history
+//
 //  All output is stored in the shared top-level `travel_market`
 //  collection because foreign stock/cost is identical for everyone.
 // ══════════════════════════════════════════════════════════════
@@ -1058,9 +1064,9 @@ exports.collectTravelMarket = onSchedule(
   async (event) => {
     const now = Math.floor(Date.now() / 1000);
 
-    // ── 1) Gather an API key + the union of all watchlisted items ──
+    // ── 1) Gather an API key + the union of all favorited item ids ──
     let apiKey = null;
-    const watched = {}; // id -> name
+    const favorites = {}; // id -> true
     try {
       const factionsSnap = await db.collection("factions").get();
       for (const fdoc of factionsSnap.docs) {
@@ -1070,13 +1076,11 @@ exports.collectTravelMarket = onSchedule(
 
         const plan = await fdoc.ref.collection("flight_planner").doc("config").get();
         if (plan.exists && plan.data().active !== false) {
-          for (const it of plan.data().items || []) {
-            if (it && it.id != null) watched[String(it.id)] = it.name || String(it.id);
-          }
+          for (const id of plan.data().favorites || []) favorites[String(id)] = true;
         }
       }
     } catch (e) {
-      console.error("flight: failed to load factions/watchlists:", e);
+      console.error("flight: failed to load factions/favorites:", e);
       return;
     }
 
@@ -1093,42 +1097,93 @@ exports.collectTravelMarket = onSchedule(
     } catch (e) {
       console.error("flight: YATA fetch failed:", e);
     }
-
-    const countries = {};
-    const itemLoc = {}; // id -> { country, cost, qty, updated }
-    if (yata && yata.stocks) {
-      for (const [code, c] of Object.entries(yata.stocks)) {
-        const name = YATA_COUNTRY[code] || code;
-        if (!YATA_COUNTRY[code]) console.warn("flight: unknown YATA country code:", code);
-
-        const items = {};
-        for (const s of c.stocks || []) {
-          const id = String(s.id);
-          const qty = s.quantity != null ? s.quantity : (s.qty || 0);
-          items[id] = { name: s.name, cost: s.cost || 0, qty };
-          itemLoc[id] = { country: name, cost: s.cost || 0, qty, updated: c.update || now };
-        }
-        countries[code] = { name, update: c.update || 0, items };
-      }
-      await db.collection("travel_market").doc("current").set({ countries, lastPoll: now });
-      console.log(`flight: YATA snapshot — ${Object.keys(countries).length} countries`);
-    } else {
-      console.warn("flight: YATA unavailable this run; skipping stock snapshot");
-    }
-
-    if (Object.keys(watched).length === 0) {
-      console.log("flight: no watched items to price");
+    if (!yata || !yata.stocks) {
+      console.warn("flight: YATA unavailable this run; aborting");
       return;
     }
 
-    // ── 3) Poll Torn market sell prices for watched items + roll history ──
+    const itemLoc = {}; // id -> { name, country, cost, qty, updated }
+    for (const [code, c] of Object.entries(yata.stocks)) {
+      const country = YATA_COUNTRY[code] || code;
+      if (!YATA_COUNTRY[code]) console.warn("flight: unknown YATA country code:", code);
+      for (const s of c.stocks || []) {
+        const id = String(s.id);
+        const qty = s.quantity != null ? s.quantity : (s.qty || 0);
+        itemLoc[id] = { name: s.name, country, cost: s.cost || 0, qty, updated: c.update || now };
+      }
+    }
+
+    // ── 3) One call prices the whole board: market_value for every item ──
+    const marketValues = {};
+    try {
+      const res = await fetch(`https://api.torn.com/torn/?selections=items&key=${apiKey}`);
+      const d = await res.json();
+      if (!d.error && d.items) {
+        for (const [id, it] of Object.entries(d.items)) marketValues[id] = it.market_value || 0;
+      } else if (d.error) {
+        console.error("flight: torn/items error:", d.error);
+      }
+    } catch (e) {
+      console.error("flight: torn/items fetch failed:", e);
+    }
+
+    // ── 4) Roll full-board history (all foreign items) + compute stats ──
+    const histRef = db.collection("travel_market").doc("history");
+    const histDoc = await histRef.get();
+    const prevHist = histDoc.exists ? histDoc.data().items || {} : {};
+    const newHist = {}; // rebuilt fresh each run so vanished items are pruned
+    const board = {};
+
+    for (const [id, loc] of Object.entries(itemLoc)) {
+      const mv = marketValues[id] || 0;
+      const h = Array.isArray(prevHist[id]) ? prevHist[id].slice() : [];
+      if (loc.cost) h.push({ t: now, c: loc.cost, q: loc.qty || 0, m: mv });
+      while (h.length > BOARD_HIST_CAP) h.shift();
+      newHist[id] = h;
+
+      const st = computeCostStats(h);
+      // "Becoming valuable" = margin (market_value − foreign cost) trending up.
+      const marginNow = mv && loc.cost ? mv - loc.cost : 0;
+      const ref = h.find((p) => (now - p.t) >= 24 * 3600) || h[0];
+      const marginRef = ref && ref.m ? ref.m - ref.c : marginNow;
+      const marginTrendPct = marginRef
+        ? Math.round(((marginNow - marginRef) / Math.abs(marginRef)) * 1000) / 10
+        : 0;
+
+      board[id] = {
+        name: loc.name,
+        country: loc.country,
+        cost: loc.cost,
+        qty: loc.qty,
+        marketValue: mv,
+        updated: loc.updated,
+        costLow: st.costLow,
+        costMedian: st.costMedian,
+        volatilityPct: st.volatilityPct,
+        inStockRate: st.inStockRate,
+        samples: st.samples,
+        marginTrendPct,
+      };
+    }
+
+    await histRef.set({ items: newHist, lastPoll: now });
+    await db.collection("travel_market").doc("board").set({ items: board, lastPoll: now });
+    console.log(`flight: board built — ${Object.keys(board).length} foreign items`);
+
+    // ── 5) Precise pricing + 7d reliability for favorites only ──
+    const favIds = Object.keys(favorites).filter((id) => itemLoc[id]);
+    if (favIds.length === 0) {
+      console.log("flight: no favorites to price precisely");
+      return;
+    }
+
     const itemsRef = db.collection("travel_market").doc("items");
     const prevDoc = await itemsRef.get();
     const prev = prevDoc.exists ? prevDoc.data().items || {} : {};
     const out = {};
     let apiCalls = 0;
 
-    for (const [id, name] of Object.entries(watched)) {
+    for (const id of favIds) {
       const loc = itemLoc[id] || {};
       const p = prev[id] || {};
 
@@ -1154,17 +1209,13 @@ exports.collectTravelMarket = onSchedule(
         console.error(`flight: market fetch failed for item ${id}:`, e);
       }
 
-      // Append a history point only when we have a fresh foreign cost.
       const hist = Array.isArray(p.hist) ? p.hist.slice() : [];
       if (loc.cost) hist.push({ t: now, c: loc.cost, q: loc.qty || 0 });
       while (hist.length > TRAVEL_MARKET_HIST_CAP) hist.shift();
 
       out[id] = {
-        name: loc.name || name,
-        country: loc.country || p.country || null,
-        cost: loc.cost || p.cost || 0,
-        qty: loc.qty != null ? loc.qty : (p.qty || 0),
-        updated: loc.updated || p.updated || 0,
+        name: loc.name,
+        country: loc.country,
         sellBazaar,
         sellItemMarket,
         sellPoll,
@@ -1174,7 +1225,7 @@ exports.collectTravelMarket = onSchedule(
     }
 
     await itemsRef.set({ items: out, lastPoll: now, apiCalls });
-    console.log(`flight: priced ${Object.keys(out).length} items (${apiCalls} market calls)`);
+    console.log(`flight: priced ${favIds.length} favorites (${apiCalls} market calls)`);
   }
 );
 

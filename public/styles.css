@@ -1189,30 +1189,27 @@ input[type="text"] { width:140px; }
 .fl-settings input:focus, .fl-settings select:focus { border-color:var(--accent); }
 .fl-settings input[type=number] { width:88px; }
 
-.fl-watchlist-bar {
-  display:flex; flex-direction:column; gap:12px;
-  padding:14px 16px; background:var(--surface); border:1px solid var(--border);
-  border-radius:10px; margin-bottom:16px;
+/* Board controls: search + country chips + sort */
+.fl-board-controls {
+  display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:14px;
 }
-.fl-add-group { width:100%; }
-.fl-add-row { display:flex; gap:8px; }
-.fl-add-row input {
-  flex:1; min-width:0; font-family:'DM Sans', sans-serif;
+.fl-search {
+  flex:1; min-width:160px; font-family:'DM Sans', sans-serif;
   background:var(--surface2); color:var(--text);
-  border:1px solid var(--border); border-radius:8px; padding:9px 11px; font-size:13px; outline:none;
+  border:1px solid var(--border); border-radius:8px; padding:9px 12px; font-size:13px; outline:none;
 }
-.fl-add-row input:focus { border-color:var(--accent); }
-.fl-chips { display:flex; flex-wrap:wrap; gap:6px; }
-.fl-chip {
-  display:inline-flex; align-items:center; gap:6px;
-  padding:4px 6px 4px 10px; background:var(--surface2); border:1px solid var(--border-light);
-  border-radius:20px; font-size:12px; color:var(--text);
+.fl-search:focus { border-color:var(--accent); }
+.fl-country-chips { display:flex; flex-wrap:wrap; gap:5px; }
+.fl-cc {
+  border:1px solid var(--border); background:var(--surface2); color:var(--text-dim);
+  border-radius:16px; padding:5px 11px; font-size:12px; cursor:pointer; transition:all .12s;
 }
-.fl-chip button {
-  border:none; background:transparent; color:var(--text-muted); cursor:pointer;
-  font-size:12px; line-height:1; padding:2px 4px; border-radius:50%;
+.fl-cc:hover { color:var(--text); border-color:var(--border-light); }
+.fl-cc.on { background:var(--accent-dim); color:var(--accent); border-color:rgba(108,156,252,0.4); }
+.fl-sort-group select {
+  font-family:'DM Sans', sans-serif; background:var(--surface2); color:var(--text);
+  border:1px solid var(--border); border-radius:8px; padding:7px 10px; font-size:13px; outline:none;
 }
-.fl-chip button:hover { color:var(--danger); background:var(--danger-bg); }
 
 /* Focus shortlist */
 .fl-focus-section { margin-bottom:18px; }
@@ -1230,23 +1227,36 @@ input[type="text"] { width:140px; }
 .fl-focus-rate span { font-size:12px; font-weight:500; color:var(--text-dim); }
 .fl-focus-sub { font-size:11px; color:var(--text-dim); margin-top:2px; }
 
-/* Ranked table */
+/* Opportunity board */
 .fl-hint { font-size:11px; color:var(--text-muted); font-weight:400; text-transform:none; margin-left:8px; }
 .fl-table { display:flex; flex-direction:column; gap:8px; }
 .fl-row {
+  display:flex; align-items:stretch;
   background:var(--surface); border:1px solid var(--border); border-left:3px solid var(--border-light);
-  border-radius:10px; cursor:pointer; transition:border-color .15s;
+  border-radius:10px; transition:border-color .15s;
 }
 .fl-row:hover { border-color:var(--border-light); }
 .fl-row.sig-go { border-left-color:var(--active); }
 .fl-row.sig-wait { border-left-color:var(--awake); }
 .fl-row.sig-skip { border-left-color:var(--danger); }
 .fl-row.sig-pending { border-left-color:var(--text-muted); }
+.fl-row.fav { background:linear-gradient(90deg, rgba(251,191,36,0.06), transparent 40%); }
+.fl-star {
+  flex:0 0 auto; align-self:stretch; border:none; background:transparent; cursor:pointer;
+  padding:0 12px; font-size:16px; color:var(--text-muted); transition:color .12s;
+}
+.fl-star:hover { color:var(--awake); }
+.fl-star.on { color:var(--awake); }
+.fl-row-body { flex:1; min-width:0; cursor:pointer; }
 .fl-row-main {
-  display:grid; grid-template-columns:auto minmax(0,1fr) auto auto;
-  align-items:center; gap:12px; padding:12px 14px;
+  display:grid; grid-template-columns:auto minmax(0,1fr) auto auto auto;
+  align-items:center; gap:12px; padding:12px 14px 12px 0;
 }
 .fl-sig { font-size:14px; }
+.fl-trend { font-size:12px; font-weight:600; white-space:nowrap; }
+.fl-trend.up { color:var(--active); }
+.fl-trend.down { color:var(--danger); }
+.fl-trend.flat { color:var(--text-muted); }
 .fl-row-id { display:flex; flex-direction:column; min-width:0; }
 .fl-item { font-size:14px; font-weight:600; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .fl-country { font-size:11px; color:var(--text-dim); }
@@ -1261,6 +1271,7 @@ input[type="text"] { width:140px; }
 .fl-tier.tier-high { color:var(--active); border-color:rgba(52,211,153,0.3); }
 .fl-tier.tier-medium { color:var(--awake); border-color:rgba(251,191,36,0.3); }
 .fl-tier.tier-low { color:var(--returning); border-color:rgba(251,146,60,0.3); }
+.fl-tier.tier-est { color:var(--text-muted); }
 .fl-tier.tier-stale { color:var(--danger); border-color:rgba(248,113,113,0.3); }
 
 .fl-row-detail {
@@ -1269,8 +1280,9 @@ input[type="text"] { width:140px; }
 }
 .fl-dt { display:flex; justify-content:space-between; gap:10px; font-size:12px; }
 .fl-dt span { color:var(--text-dim); }
-.fl-dt b { color:var(--text); font-weight:600; text-align:right; }
+.fl-dt b { color:var(--text); font-weight:600; text-align:right; display:flex; align-items:center; gap:4px; justify-content:flex-end; }
 .fl-dt b em { color:var(--text-dim); font-weight:400; font-style:normal; font-size:11px; }
+.fl-fav-hint b { color:var(--awake); font-weight:500; font-size:11px; }
 
 .fl-disclaimer { font-size:11px; color:var(--text-muted); line-height:1.6; margin-top:14px; }
 
@@ -1279,7 +1291,10 @@ input[type="text"] { width:140px; }
   .fl-header h2 { font-size:18px; }
   .fl-settings { gap:10px 14px; padding:12px 14px; }
   .fl-settings input[type=number] { width:72px; }
-  .fl-row-main { grid-template-columns:auto minmax(0,1fr) auto; gap:8px; }
+  .fl-board-controls { gap:8px; }
+  .fl-search { min-width:0; flex:1 1 100%; }
+  .fl-row-main { grid-template-columns:auto minmax(0,1fr) auto auto; gap:8px; }
+  .fl-star { padding:0 9px; }
   .fl-tier { display:none; }
   .fl-row.open .fl-row-main { border-bottom:none; }
   .fl-row-detail { grid-template-columns:1fr; gap:6px; }
