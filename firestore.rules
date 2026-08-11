@@ -46,6 +46,25 @@ service cloud.firestore {
           && isFactionOwner(factionId)
           && docId == 'config';
       }
+
+      // Flight planner — readable by faction members.
+      // Owner writes the 'config' doc (watchlist + planner settings).
+      // Any computed output docs are written by Cloud Functions only.
+      match /flight_planner/{docId} {
+        allow read: if request.auth != null && isFactionMember(factionId);
+        allow write: if request.auth != null
+          && isFactionOwner(factionId)
+          && docId == 'config';
+      }
+    }
+
+    // ── Travel market (global) ──
+    // Foreign stock/cost and market sell prices are identical for every
+    // faction, so they live in one shared collection written only by the
+    // flight-planner collector. Any signed-in user may read.
+    match /travel_market/{docId} {
+      allow read: if request.auth != null;
+      allow write: if false; // Cloud Functions only
     }
 
     // ── Helper functions ──

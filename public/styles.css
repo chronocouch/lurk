@@ -1168,3 +1168,121 @@ input[type="text"] { width:140px; }
   .nav-tabs { padding:1px; }
   .nav-tab { padding:7px 8px; }
 }
+
+
+/* ═══════════════════════════════════════════════════════════
+   FLIGHT PLANNER
+   ═══════════════════════════════════════════════════════════ */
+.fl-header { margin-bottom:12px; }
+.fl-header h2 { font-size:20px; font-weight:600; }
+.fl-subtitle { font-size:13px; color:var(--text-dim); margin-top:4px; line-height:1.5; }
+
+.fl-settings {
+  display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end;
+  padding:14px 16px; background:var(--surface); border:1px solid var(--border);
+  border-radius:10px; margin-bottom:12px;
+}
+.fl-settings input, .fl-settings select {
+  font-family:'DM Sans', sans-serif; background:var(--surface2); color:var(--text);
+  border:1px solid var(--border); border-radius:8px; padding:8px 10px; font-size:13px; outline:none;
+}
+.fl-settings input:focus, .fl-settings select:focus { border-color:var(--accent); }
+.fl-settings input[type=number] { width:88px; }
+
+.fl-watchlist-bar {
+  display:flex; flex-direction:column; gap:12px;
+  padding:14px 16px; background:var(--surface); border:1px solid var(--border);
+  border-radius:10px; margin-bottom:16px;
+}
+.fl-add-group { width:100%; }
+.fl-add-row { display:flex; gap:8px; }
+.fl-add-row input {
+  flex:1; min-width:0; font-family:'DM Sans', sans-serif;
+  background:var(--surface2); color:var(--text);
+  border:1px solid var(--border); border-radius:8px; padding:9px 11px; font-size:13px; outline:none;
+}
+.fl-add-row input:focus { border-color:var(--accent); }
+.fl-chips { display:flex; flex-wrap:wrap; gap:6px; }
+.fl-chip {
+  display:inline-flex; align-items:center; gap:6px;
+  padding:4px 6px 4px 10px; background:var(--surface2); border:1px solid var(--border-light);
+  border-radius:20px; font-size:12px; color:var(--text);
+}
+.fl-chip button {
+  border:none; background:transparent; color:var(--text-muted); cursor:pointer;
+  font-size:12px; line-height:1; padding:2px 4px; border-radius:50%;
+}
+.fl-chip button:hover { color:var(--danger); background:var(--danger-bg); }
+
+/* Focus shortlist */
+.fl-focus-section { margin-bottom:18px; }
+.fl-focus-grid {
+  display:grid; grid-template-columns:repeat(auto-fill, minmax(180px, 1fr)); gap:10px;
+}
+.fl-focus-card {
+  padding:12px 14px; border-radius:10px;
+  background:var(--active-bg); border:1px solid rgba(52,211,153,0.3);
+}
+.fl-focus-top { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
+.fl-focus-item { font-size:14px; font-weight:600; color:var(--text); }
+.fl-focus-country { font-size:11px; color:var(--text-dim); }
+.fl-focus-rate { font-size:22px; font-weight:700; color:var(--active); margin-top:6px; }
+.fl-focus-rate span { font-size:12px; font-weight:500; color:var(--text-dim); }
+.fl-focus-sub { font-size:11px; color:var(--text-dim); margin-top:2px; }
+
+/* Ranked table */
+.fl-hint { font-size:11px; color:var(--text-muted); font-weight:400; text-transform:none; margin-left:8px; }
+.fl-table { display:flex; flex-direction:column; gap:8px; }
+.fl-row {
+  background:var(--surface); border:1px solid var(--border); border-left:3px solid var(--border-light);
+  border-radius:10px; cursor:pointer; transition:border-color .15s;
+}
+.fl-row:hover { border-color:var(--border-light); }
+.fl-row.sig-go { border-left-color:var(--active); }
+.fl-row.sig-wait { border-left-color:var(--awake); }
+.fl-row.sig-skip { border-left-color:var(--danger); }
+.fl-row.sig-pending { border-left-color:var(--text-muted); }
+.fl-row-main {
+  display:grid; grid-template-columns:auto minmax(0,1fr) auto auto;
+  align-items:center; gap:12px; padding:12px 14px;
+}
+.fl-sig { font-size:14px; }
+.fl-row-id { display:flex; flex-direction:column; min-width:0; }
+.fl-item { font-size:14px; font-weight:600; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.fl-country { font-size:11px; color:var(--text-dim); }
+.fl-row-nums { display:flex; flex-direction:column; align-items:flex-end; }
+.fl-rate { font-size:16px; font-weight:700; color:var(--text); }
+.fl-permin { font-size:11px; font-weight:500; color:var(--text-dim); }
+.fl-margin { font-size:11px; color:var(--text-dim); }
+.fl-tier {
+  font-size:10px; padding:3px 8px; border-radius:12px; white-space:nowrap;
+  background:var(--surface2); color:var(--text-dim); border:1px solid var(--border);
+}
+.fl-tier.tier-high { color:var(--active); border-color:rgba(52,211,153,0.3); }
+.fl-tier.tier-medium { color:var(--awake); border-color:rgba(251,191,36,0.3); }
+.fl-tier.tier-low { color:var(--returning); border-color:rgba(251,146,60,0.3); }
+.fl-tier.tier-stale { color:var(--danger); border-color:rgba(248,113,113,0.3); }
+
+.fl-row-detail {
+  border-top:1px solid var(--border); padding:12px 14px;
+  display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:8px 18px;
+}
+.fl-dt { display:flex; justify-content:space-between; gap:10px; font-size:12px; }
+.fl-dt span { color:var(--text-dim); }
+.fl-dt b { color:var(--text); font-weight:600; text-align:right; }
+.fl-dt b em { color:var(--text-dim); font-weight:400; font-style:normal; font-size:11px; }
+
+.fl-disclaimer { font-size:11px; color:var(--text-muted); line-height:1.6; margin-top:14px; }
+
+/* Flights mobile */
+@media (max-width:640px) {
+  .fl-header h2 { font-size:18px; }
+  .fl-settings { gap:10px 14px; padding:12px 14px; }
+  .fl-settings input[type=number] { width:72px; }
+  .fl-row-main { grid-template-columns:auto minmax(0,1fr) auto; gap:8px; }
+  .fl-tier { display:none; }
+  .fl-row.open .fl-row-main { border-bottom:none; }
+  .fl-row-detail { grid-template-columns:1fr; gap:6px; }
+  .fl-focus-grid { grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:8px; }
+  .fl-focus-rate { font-size:20px; }
+}
