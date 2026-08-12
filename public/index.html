@@ -971,6 +971,31 @@ function flWindowNote(r){
   if(r.windowState==='stable')return`Stock isn't meaningfully depleting.`;
   return`Not enough history yet to size a window.`;
 }
+// Round DOWN to a tidy step so we never recommend above the anchor price.
+function flNiceUndercut(n){n=Math.max(0,Math.round(n));let step;if(n>=1e6)step=10000;else if(n>=1e5)step=1000;else if(n>=1e4)step=100;else if(n>=1e3)step=10;else step=1;return Math.floor(n/step)*step}
+// Recommended bazaar list price. Favorites use precise item-market floor +
+// lowest competing bazaar; others fall back to market value (est).
+function flPriceRec(r){
+  const bz=r.sellBz||0,im=r.sellItemMarket||0;
+  if(r.precise&&(bz||im)){
+    const anchor=(bz&&im)?Math.min(bz,im):(bz||im);
+    let base;
+    if(flConfig.sellPref==='low')base=anchor*0.97;        // undercut everyone, move fast
+    else if(flConfig.sellPref==='high')base=(bz||anchor); // sit at lowest bazaar (repeat buyers)
+    else base=(bz&&im)?Math.min(bz,im):anchor;            // balanced: match lowest bazaar, capped at item market
+    if(im)base=Math.min(base,im*0.999);                    // never list above the item-market floor
+    return{list:flNiceUndercut(base),precise:true,note:`item market ${flMoney(im)} · bazaars from ${bz?flMoney(bz):'—'}`};
+  }
+  const mv=r.mv||0;if(!mv)return null;
+  const base=flConfig.sellPref==='low'?mv*0.95:flConfig.sellPref==='high'?mv:mv*0.98;
+  return{list:flNiceUndercut(base),precise:false,note:`≈ market value ${flMoney(mv)} (est — star to price precisely)`};
+}
+window.flCopyPrice=function(v,ev){
+  if(ev)ev.stopPropagation();
+  const t=ev&&ev.currentTarget;const s=String(Math.round(v));
+  const flash=()=>{if(t){const o=t.textContent;t.textContent='✓';setTimeout(()=>{t.textContent=o},900)}};
+  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(s).then(flash).catch(flash);else flash();
+};
 
 function flRender(){
   const table=document.getElementById('fl-table');if(!table)return;
@@ -1014,10 +1039,15 @@ function flRowHtml(r){
   const marginTxt=r.effSell?flMoney(r.margin)+'/ea'+(r.precise?'':' <em>est</em>'):'no price';
   const costVs=r.costMedian?(r.cost<=r.costLow*1.02?'at low':r.cost<=r.costMedian?'below median':'above median'):'—';
   const relLabel=r.precise?'In-stock / volatility (7d)':'In-stock / volatility (recent)';
+  const rec=flPriceRec(r);
+  const listChip=(r.isFav&&rec&&rec.precise)?`<span class="fl-listrec" title="Recommended bazaar list price">List ${flMoney(rec.list)}<button class="fl-copy" onclick="flCopyPrice(${rec.list},event)" title="Copy price">📋</button></span>`:'';
+  const recBlock=rec?`<div class="fl-dt fl-price-rec"><span>Recommend list at</span><b><span class="fl-price-val">${flMoney(rec.list)}</span><button class="fl-copy" onclick="flCopyPrice(${rec.list},event)" title="Copy price">📋</button></b></div>
+    <div class="fl-dt fl-price-refs"><span>${rec.precise?'Undercuts':'Basis'}</span><b>${rec.note}</b></div>`:'';
   const sellLine=r.precise
     ?`<div class="fl-dt"><span>Sell band (mkt−fee ↔ bazaar)</span><b>${r.dump?flMoney(r.dump):'—'} ↔ ${r.sellBz?flMoney(r.sellBz):'—'}</b></div><div class="fl-dt"><span>Your effective sell</span><b>${r.effSell?flMoney(r.effSell):'—'}</b></div>`
     :`<div class="fl-dt"><span>Sell (market value, est)</span><b>${r.mv?flMoney(r.mv):'—'}</b></div><div class="fl-dt fl-fav-hint"><span>Star to track</span><b>precise pricing + reliability</b></div>`;
   const detail=open?`<div class="fl-row-detail">
+    ${recBlock}
     <div class="fl-dt"><span>Buy (foreign)</span><b>${flMoney(r.cost)} <em>${costVs}</em></b></div>
     <div class="fl-dt"><span>Cost low / median</span><b>${r.costLow?flMoney(r.costLow):'—'} / ${r.costMedian?flMoney(r.costMedian):'—'}</b></div>
     ${sellLine}
@@ -1038,7 +1068,7 @@ function flRowHtml(r){
       <div class="fl-row-main">
         <span class="fl-sig" title="${sig.label}">${sig.icon}</span>
         <div class="fl-row-id"><span class="fl-item">${r.name}</span><span class="fl-country">${r.country||'unknown'}</span></div>
-        <div class="fl-row-nums"><span class="fl-rate">${rate}</span><span class="fl-margin">${marginTxt} ${Math.abs(r.trend)>3?flTrendHtml(r.trend):''}</span></div>
+        <div class="fl-row-nums"><span class="fl-rate">${rate}</span><span class="fl-margin">${marginTxt} ${Math.abs(r.trend)>3?flTrendHtml(r.trend):''}</span>${listChip}</div>
         ${flWindowPill(r)}
         ${flFlyLink(r,false)}
       </div>${detail}

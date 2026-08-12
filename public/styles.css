@@ -1301,6 +1301,24 @@ input[type="text"] { width:140px; }
 .fl-detail-actions { grid-column:1 / -1; display:flex; justify-content:flex-end; margin-top:4px; }
 .fl-focus-foot { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:8px; }
 
+/* Pricing recommendation */
+.fl-listrec {
+  display:inline-flex; align-items:center; gap:4px; margin-top:3px;
+  font-size:12px; font-weight:600; color:var(--active);
+}
+.fl-copy {
+  border:none; background:transparent; cursor:pointer; padding:1px 3px;
+  font-size:12px; line-height:1; border-radius:4px; color:var(--text-dim);
+}
+.fl-copy:hover { color:var(--accent); background:var(--accent-dim); }
+.fl-price-rec { grid-column:1 / -1; padding:8px 10px; background:var(--active-bg);
+  border:1px solid rgba(52,211,153,0.3); border-radius:8px; }
+.fl-price-rec span { color:var(--text-dim); font-size:12px; }
+.fl-price-val { color:var(--active); font-weight:700; font-size:15px; }
+.fl-price-rec b { gap:6px; }
+.fl-price-refs { grid-column:1 / -1; margin-top:-2px; }
+.fl-price-refs b { font-weight:500; color:var(--text-dim); font-size:11px; }
+
 .fl-disclaimer { font-size:11px; color:var(--text-muted); line-height:1.6; margin-top:14px; }
 
 /* Flights mobile */
