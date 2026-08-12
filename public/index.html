@@ -406,7 +406,7 @@ let wbImminentOppId=null;      // currently most-imminent returning opponent
 let intelOffset=0,intelCollapsed=false;
 // ─── Flight planner state ───
 let flConfig={favorites:[],capacity:15,method:'standard',feePct:5,sellPref:'mid'};
-let flBoard={},flBoardMeta={},flItems={},flUnsubBoard=null,flUnsubItems=null,flUnsubConfig=null,flExpanded={},flCountryFilter='all';
+let flBoard={},flBoardMeta={},flItems={},flFlow={},flUnsubBoard=null,flUnsubItems=null,flUnsubConfig=null,flUnsubFlow=null,flExpanded={},flCountryFilter='all';
 // One-way standard flight times in seconds (mirror of functions/index.js FLIGHT_TIMES).
 const FL_TIMES={"Mexico":1560,"Canada":2220,"Cayman Islands":3420,"Hawaii":7260,"United Kingdom":9120,"Switzerland":10140,"Argentina":11340,"Japan":12180,"China":13140,"UAE":15540,"South Africa":18660};
 const FL_METHOD_MULT={standard:1,airstrip:0.70,wlt:0.50};
@@ -442,6 +442,7 @@ window.signOut=async function(){
   if(wbUnsubEvents){wbUnsubEvents();wbUnsubEvents=null}
   if(flUnsubBoard){flUnsubBoard();flUnsubBoard=null}
   if(flUnsubItems){flUnsubItems();flUnsubItems=null}
+  if(flUnsubFlow){flUnsubFlow();flUnsubFlow=null}
   if(flUnsubConfig){flUnsubConfig();flUnsubConfig=null}
   closeProfileMenu();
   if(firebaseReady)await _fb.fbSignOut(auth);
@@ -865,9 +866,10 @@ function flMoney(n){n=Math.round(n||0);const neg=n<0;n=Math.abs(n);let s;if(n>=1
 
 function initFlights(){
   if(!firebaseReady||!userFactionId)return;
-  if(flUnsubBoard)flUnsubBoard();if(flUnsubItems)flUnsubItems();if(flUnsubConfig)flUnsubConfig();
+  if(flUnsubBoard)flUnsubBoard();if(flUnsubItems)flUnsubItems();if(flUnsubConfig)flUnsubConfig();if(flUnsubFlow)flUnsubFlow();
   flUnsubBoard=_fb.onSnapshot(_fb.doc(db,'travel_market','board'),s=>{flBoard=s.exists()?s.data():{};flRender()});
   flUnsubItems=_fb.onSnapshot(_fb.doc(db,'travel_market','items'),s=>{flItems=s.exists()?(s.data().items||{}):{};flRender()});
+  flUnsubFlow=_fb.onSnapshot(_fb.doc(db,'travel_market','flow'),s=>{flFlow=s.exists()?(s.data().items||{}):{};flRender()});
   flUnsubConfig=_fb.onSnapshot(_fb.doc(db,'factions/'+userFactionId+'/flight_planner','config'),s=>{if(s.exists())flApplyConfig(s.data());flRender()});
 }
 
@@ -907,7 +909,10 @@ function flCompute(){
   const items=flBoard.items||{};const rows=[];
   for(const [id,b] of Object.entries(items)){
     const isFav=favSet.has(id);const it=isFav?(flItems[id]||{}):{};
-    const cost=b.cost||0,qty=b.qty||0,country=b.country||null,updated=b.updated||0,mv=b.marketValue||0,trend=b.marginTrendPct||0;
+    const f=flFlow[id]||null; // finer 5-min stock/depletion, when available
+    const cost=b.cost||0,country=b.country||null,mv=b.marketValue||0,trend=b.marginTrendPct||0;
+    const qty=(f&&f.qty!=null)?f.qty:(b.qty||0);
+    const updated=(f&&f.updated)?f.updated:(b.updated||0);
     const oneway=country?FL_TIMES[country]:null;
     // Sell price: favorites use the precise bazaar/item-market band; others use market_value (est).
     let precise=false,sellBz=0,sellIm=0,dump=0,effSell=0;
@@ -933,13 +938,17 @@ function flCompute(){
     if(!precise)tier='est';
     else{tier='building';if(samples>=6){const v=it.volatilityPct||0;tier=v<5?'high':v<12?'medium':'low'}}
     if(stale)tier='stale';
-    // Fly window: will stock survive the OUTBOUND flight?
-    const depletionPerMin=b.depletionPerMin||0,restockIntervalMin=b.restockIntervalMin||0,restockSize=b.restockSize||0;
+    // Fly window: will stock survive the OUTBOUND flight? Prefer the finer
+    // 5-min flow series; fall back to the 15-min board stats.
+    const depletionPerMin=f?(f.depletionPerMin||0):(b.depletionPerMin||0);
+    const restockIntervalMin=f?(f.restockIntervalMin||0):(b.restockIntervalMin||0);
+    const restockSize=f?(f.restockSize||0):(b.restockSize||0);
+    const windowSamples=f?(f.flowSamples||0):(b.samples||0);
     const flightOutMin=rtMin!=null?rtMin/2:null;
     const timeToEmpty=(depletionPerMin>0&&qty>0)?qty/depletionPerMin:null;
     const latestDep=(timeToEmpty!=null&&flightOutMin!=null)?timeToEmpty-flightOutMin:null;
     let windowState;
-    if(flightOutMin==null||(b.samples||0)<3)windowState='unknown';
+    if(flightOutMin==null||windowSamples<3)windowState='unknown';
     else if(depletionPerMin<=0||timeToEmpty==null)windowState='stable';
     else if(latestDep>20)windowState='safe';
     else if(latestDep>0)windowState='tight';

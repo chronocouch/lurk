@@ -56,6 +56,8 @@ const YATA_COUNTRY = {
 const TRAVEL_MARKET_HIST_CAP = 672; // ~7 days at 15-min cadence (favorites)
 const BOARD_HIST_CAP = 96;          // ~24h at 15-min cadence (full board — kept small
                                     // so the all-items history doc stays well under 1MB)
+const STOCK_HIST_CAP = 120;         // fine-grained qty series for the fly-window model
+                                    // (deduped to YATA's native cadence, not fixed 5-min)
 
 // Depletion + restock flow from a qty/cost history series. Sampling is
 // coarse (15 min), so these are NET rates over observed intervals, not a
@@ -1265,6 +1267,72 @@ exports.collectTravelMarket = onSchedule(
 
     await itemsRef.set({ items: out, lastPoll: now, apiCalls });
     console.log(`flight: priced ${favIds.length} favorites (${apiCalls} market calls)`);
+  }
+);
+
+
+// ══════════════════════════════════════════════════════════════
+//  STOCK POLLER — runs every 5 minutes (YATA only, no Torn key)
+//  Captures foreign stock at YATA's native cadence to give the fly
+//  window a finer depletion/restock estimate than the 15-min board.
+//  Cheap: one YATA request + one Firestore doc per run.
+// ══════════════════════════════════════════════════════════════
+exports.collectStock = onSchedule(
+  {
+    schedule: "every 5 minutes",
+    timeZone: "UTC",
+    retryCount: 1,
+    memory: "256MiB",
+  },
+  async (event) => {
+    const now = Math.floor(Date.now() / 1000);
+
+    let yata = null;
+    try {
+      const res = await fetch("https://yata.yt/api/v1/travel/export/");
+      yata = await res.json();
+    } catch (e) {
+      console.error("stock: YATA fetch failed:", e);
+      return;
+    }
+    if (!yata || !yata.stocks) {
+      console.warn("stock: YATA unavailable this run");
+      return;
+    }
+
+    const flowRef = db.collection("travel_market").doc("flow");
+    const prevDoc = await flowRef.get();
+    const prev = prevDoc.exists ? prevDoc.data().items || {} : {};
+    const out = {};
+
+    for (const [, c] of Object.entries(yata.stocks)) {
+      const updated = c.update || now;
+      for (const s of c.stocks || []) {
+        const id = String(s.id);
+        const qty = s.quantity != null ? s.quantity : (s.qty || 0);
+        const p = prev[id] || {};
+        const hist = Array.isArray(p.hist) ? p.hist.slice() : [];
+        const last = hist[hist.length - 1];
+        // Dedupe to YATA's real observation time — only append when the
+        // country's stock timestamp actually advanced.
+        if (!last || updated > last.t) hist.push({ t: updated, q: qty });
+        while (hist.length > STOCK_HIST_CAP) hist.shift();
+
+        const flow = computeFlowStats(hist);
+        out[id] = {
+          qty,
+          updated,
+          hist,
+          depletionPerMin: flow.depletionPerMin,
+          restockIntervalMin: flow.restockIntervalMin,
+          restockSize: flow.restockSize,
+          flowSamples: flow.flowSamples,
+        };
+      }
+    }
+
+    await flowRef.set({ items: out, lastPoll: now });
+    console.log(`stock: flow updated for ${Object.keys(out).length} items`);
   }
 );
 
