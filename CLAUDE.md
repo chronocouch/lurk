@@ -24,7 +24,7 @@ Multi-tenant Firebase web app providing activity intelligence for Torn City fact
 
 ### Frontend
 - **Single file:** `public/index.html` (vanilla JS, no framework)
-- Contains: landing page, Google + email auth, onboarding flow, app shell with three tabs (Activity heatmap, War Buddy, War Intel), Settings
+- Contains: landing page, Google + email auth, onboarding flow, app shell with four tabs (Activity heatmap, War Buddy, Flights, War Intel), Settings
 - **Styles:** extracted to `public/styles.css`
 - **PWA:** `public/manifest.webmanifest`, `public/sw.js`
 - Reads from per-faction Firestore paths
@@ -46,6 +46,8 @@ Multi-tenant Firebase web app providing activity intelligence for Torn City fact
 | `aggregatePatterns` | scheduled (hourly) | Builds peacetime/wartime heatmap data per faction |
 | `watchReturning` | Firestore trigger | Rapid-polls opponents near landing for accurate landing detection |
 | `cleanupStaleUsers` | scheduled (weekly) | Removes stale user records |
+| `collectTravelMarket` | scheduled (15 min) | Flights planner: YATA foreign stock/cost + `torn/items` market value + per-favorite bazaar/item-market sell prices → shared `travel_market/board`+`items` |
+| `collectStock` | scheduled (5 min) | Flights planner: YATA-only stock poll (no key), finer depletion/restock for the fly window → shared `travel_market/flow` |
 
 ### Firestore structure
 ```
@@ -60,7 +62,15 @@ factions/{factionId}/war_tracking/config             → war buddy config
 factions/{factionId}/war_tracking/status             → current war state
 factions/{factionId}/war_tracking/events             → war events
 factions/{factionId}/war_tracking/opponent_activity_*  → tracked opponent data
+factions/{factionId}/flight_planner/config           → Flights: watchlist favorites + planner settings (owner-writable)
+
+travel_market/board                                  → GLOBAL: all foreign items (cost, stock, market-value sell, 24h margin trend, stats)
+travel_market/items                                  → GLOBAL: precise sell + 7d reliability for favorited items only
+travel_market/flow                                   → GLOBAL: 5-min stock series → depletion/restock for the fly window
+travel_market/history                                → GLOBAL: rolling per-item cost/stock history (board stats source)
 ```
+
+**Flights data is global, not per-faction:** foreign stock/cost and market prices are identical for everyone, so `travel_market/*` is one shared collection (any signed-in user reads; Cloud Functions only write). This keeps its cost fixed regardless of faction count.
 
 ### Security
 - Firestore rules enforce per-faction isolation
@@ -92,6 +102,7 @@ factions/{factionId}/war_tracking/opponent_activity_*  → tracked opponent data
 - Heatmap UI: peacetime, wartime, opponent views
 - War Buddy: opponent travel tracker, flight estimates, imminent alerts, filter chips
 - War Intel: differential coverage bar + auto-detected vulnerability/opportunity windows (<2 online flagged, 0 = critical) with member lists
+- Flights planner: discovery board of all foreign items ranked by expected $/min, favorites (pinned + precise pricing), fly window (depletion vs. flight time), copyable bazaar list-price recommendation, ✈ links to Torn's travel agency. Backed by YATA + `torn/items`; reliability/window sharpen over ~1–2 weeks of history.
 - Firestore rules
 - In active use by my faction "The North Stand" during ranked wars
 
