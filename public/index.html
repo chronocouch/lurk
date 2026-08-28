@@ -399,7 +399,7 @@ let currentUser=null,userFactionId=null,userFactionName=null;
 let hmPatterns={},hmMeta={},hmMemberInfo={},hmViewOffset=0,hmCurrentView='peacetime';
 let hmPeacetimePatterns={},hmPeacetimeMeta={},hmWartimePatterns={},hmWartimeMeta={};
 let hmOpponentPatterns={},hmOpponentMeta={},hmOpponentFactionName='';
-let wbOpponents={},wbTrackingActive=false,wbOpponentFactionName='',wbLastPoll=0;
+let wbOpponents={},wbTrackingActive=false,wbOpponentFactionName='',wbLastPoll=0,wbExpectedOppId=null,wbCollecting=false;
 let wbCountdownInterval=null,wbUnsubStatus=null,wbUnsubEvents=null;
 let wbActiveFilter=null;       // 'okay' | 'returning' | 'traveling_out' | 'abroad' | 'hospital' | null
 let wbImminentOppId=null;      // currently most-imminent returning opponent
@@ -679,7 +679,7 @@ function attackable(s){return s==='okay'||s==='in_torn'}
 async function initWarBuddy(){
   if(!userFactionId)return;
   try{const c=await _fb.getDoc(_fb.doc(db,'factions/'+userFactionId+'/war_tracking','config'));
-    if(c.exists()&&c.data().active){wbTrackingActive=true;document.getElementById('wb-faction-id-input').value=c.data().opponentFactionId||'';wbUpdateUI();wbSubscribe()}}
+    if(c.exists()&&c.data().active){wbTrackingActive=true;wbExpectedOppId=c.data().opponentFactionId?Number(c.data().opponentFactionId):null;document.getElementById('wb-faction-id-input').value=c.data().opponentFactionId||'';wbUpdateUI();wbSubscribe()}}
   catch(e){}
   wbStartTicker();
 }
@@ -700,20 +700,30 @@ window.wbDetectWar=async function(){
 window.wbStartTracking=async function(){
   if(!firebaseReady||!userFactionId)return;
   const fid=document.getElementById('wb-faction-id-input').value.trim();if(!fid||isNaN(fid))return alert('Enter a valid faction ID.');
-  const base='factions/'+userFactionId+'/war_tracking';
-  await _fb.setDoc(_fb.doc(db,base,'config'),{active:true,opponentFactionId:parseInt(fid),startedAt:Math.floor(Date.now()/1000)});
-  wbTrackingActive=true;wbUpdateUI();wbSubscribe();
+  const oppId=parseInt(fid);const base='factions/'+userFactionId+'/war_tracking';
+  // Clear the previous opponent immediately so stale intel never lingers, and
+  // show a "Collecting intel…" state until the new faction's data lands. A
+  // Firestore trigger (onWarConfigChange) polls the opponent server-side within
+  // a couple seconds; the subscription below renders it as soon as it arrives.
+  wbExpectedOppId=oppId;wbCollecting=true;wbOpponents={};wbOpponentFactionName='';wbLastPoll=0;
+  wbTrackingActive=true;wbUpdateUI();wbSyncBadge(true);wbRenderMeta(null);wbRenderSummary();wbRenderOpponents();
+  await _fb.setDoc(_fb.doc(db,base,'config'),{active:true,opponentFactionId:oppId,startedAt:Math.floor(Date.now()/1000)});
+  wbSubscribe();
 };
 window.wbStopTracking=async function(){
   if(!firebaseReady||!userFactionId)return;
   await _fb.setDoc(_fb.doc(db,'factions/'+userFactionId+'/war_tracking','config'),{active:false,opponentFactionId:null,stoppedAt:Math.floor(Date.now()/1000)});
-  wbTrackingActive=false;wbOpponents={};wbOpponentFactionName='';wbLastPoll=0;wbUpdateUI();wbSyncBadge(false);wbRenderMeta(null);wbRenderOpponents();wbRenderSummary();
+  wbTrackingActive=false;wbCollecting=false;wbExpectedOppId=null;wbOpponents={};wbOpponentFactionName='';wbLastPoll=0;wbUpdateUI();wbSyncBadge(false);wbRenderMeta(null);wbRenderOpponents();wbRenderSummary();
   if(wbUnsubStatus){wbUnsubStatus();wbUnsubStatus=null}if(wbUnsubEvents){wbUnsubEvents();wbUnsubEvents=null}
 };
 function wbSubscribe(){
   if(wbUnsubStatus)wbUnsubStatus();if(wbUnsubEvents)wbUnsubEvents();
   const base='factions/'+userFactionId+'/war_tracking';
-  wbUnsubStatus=_fb.onSnapshot(_fb.doc(db,base,'status'),s=>{if(!s.exists())return;const d=s.data();wbOpponents=d.opponents||{};wbOpponentFactionName=d.opponentFactionName||'';wbLastPoll=d.lastPoll||0;wbSyncBadge(true);wbRenderMeta(d);wbRenderSummary();wbRenderOpponents()});
+  wbUnsubStatus=_fb.onSnapshot(_fb.doc(db,base,'status'),s=>{if(!s.exists())return;const d=s.data();
+    // Ignore a stale status doc still holding the previous opponent — wait for
+    // the poll that matches the faction we just started tracking.
+    if(wbExpectedOppId&&Number(d.opponentFactionId)!==Number(wbExpectedOppId))return;
+    wbCollecting=false;wbOpponents=d.opponents||{};wbOpponentFactionName=d.opponentFactionName||'';wbLastPoll=d.lastPoll||0;wbSyncBadge(true);wbRenderMeta(d);wbRenderSummary();wbRenderOpponents()});
   wbUnsubEvents=_fb.onSnapshot(_fb.doc(db,base,'events'),s=>{if(!s.exists())return;wbRenderEvents(s.data().events||[])});
 }
 function wbUpdateUI(){
@@ -732,7 +742,7 @@ window.wbToggleControls=function(){
 window.wbToggleEventLog=function(){
   document.getElementById('wb-event-log').classList.toggle('collapsed');
 };
-function wbSyncBadge(a){const d=document.getElementById('wb-sync-dot'),t=document.getElementById('wb-sync-text');if(a){d.className='dot';t.textContent='Tracking · '+Object.keys(wbOpponents).length+' opponents'}else{d.className='dot off';t.textContent='Inactive'}}
+function wbSyncBadge(a){const d=document.getElementById('wb-sync-dot'),t=document.getElementById('wb-sync-text');if(a){d.className='dot';t.textContent=wbCollecting?'Collecting…':'Tracking · '+Object.keys(wbOpponents).length+' opponents'}else{d.className='dot off';t.textContent='Inactive'}}
 function wbRenderMeta(d){document.getElementById('wb-meta-bar').innerHTML=d?`<div class="meta-item">Faction <span class="meta-value">${wbOpponentFactionName}</span></div><div class="meta-item">Opponents <span class="meta-value">${d.memberCount||'?'}</span></div><div class="meta-item">Last poll <span class="meta-value">${wbLastPoll?timeAgo(wbLastPoll):'—'}</span></div>`:'';}
 
 // ─── Filter chips: tap a summary card to filter the opponent list ───
@@ -759,7 +769,7 @@ function wbRenderSummary(){
 }
 window.wbRenderOpponents=function(){
   const list=document.getElementById('wb-opponent-list');const es=Object.entries(wbOpponents);
-  if(!es.length){list.innerHTML=wbTrackingActive?'<div class="state-banner"><h3>Waiting for first poll…</h3><p>The Cloud Function runs every 15 minutes.</p></div>':'<div class="state-banner"><h3>No active war tracking</h3><p>Enter an opponent faction ID and click Start Tracking.</p></div>';return}
+  if(!es.length){list.innerHTML=wbCollecting?'<div class="state-banner"><h3>Collecting intel…</h3><p>Pulling the opponent\'s current status. This usually takes just a few seconds.</p></div>':wbTrackingActive?'<div class="state-banner"><h3>Waiting for first poll…</h3><p>The Cloud Function runs every 15 minutes.</p></div>':'<div class="state-banner"><h3>No active war tracking</h3><p>Enter an opponent faction ID and click Start Tracking.</p></div>';return}
   const sm=document.getElementById('wb-sort-select').value;
   let sorted=es.map(([id,o])=>({id,...o}));
   // Apply filter

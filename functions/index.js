@@ -1374,6 +1374,53 @@ exports.cleanupStaleUsers = onSchedule(
 
 
 // ══════════════════════════════════════════════════════════════
+//  IMMEDIATE WAR POLL — Firestore-triggered on war_tracking/config
+//  When a faction starts (or switches) opponent tracking, poll the
+//  opponent right away so the UI shows fresh intel in seconds instead
+//  of waiting up to 15 min for collectActivity. Only fires on a real
+//  start/switch, and writes war_tracking/status (never config) so there
+//  is no trigger loop.
+// ══════════════════════════════════════════════════════════════
+exports.onWarConfigChange = onDocumentWritten(
+  {
+    document: "factions/{factionId}/war_tracking/config",
+    memory: "256MiB",
+  },
+  async (event) => {
+    const after = event.data?.after?.data();
+    if (!after || !after.active) return;
+
+    const opponentFactionId = after.opponentFactionId;
+    if (!opponentFactionId) return;
+
+    // Only poll on a genuine start or opponent switch — not on unrelated
+    // config writes (e.g. stopping, which sets active:false and returns above).
+    const before = event.data?.before?.data() || {};
+    if (before.active && Number(before.opponentFactionId) === Number(opponentFactionId)) return;
+
+    const factionId = event.params.factionId;
+    const configDoc = await db
+      .collection("factions")
+      .doc(factionId)
+      .collection("internal")
+      .doc("config")
+      .get();
+    if (!configDoc.exists) return;
+    const apiKey = decryptApiKey(configDoc.data().apiKey);
+
+    const factionRef = db.collection("factions").doc(factionId);
+    const now = Math.floor(Date.now() / 1000);
+    try {
+      await pollOpponents(factionRef, apiKey, opponentFactionId, now);
+      console.log(`Immediate war poll: faction ${factionId} vs ${opponentFactionId}`);
+    } catch (e) {
+      console.error(`Immediate war poll failed for ${factionId}:`, e);
+    }
+  }
+);
+
+
+// ══════════════════════════════════════════════════════════════
 //  RAPID RETURN WATCHER — Firestore-triggered
 //  Listens on factions/{factionId}/war_tracking/status
 // ══════════════════════════════════════════════════════════════
