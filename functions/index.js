@@ -147,6 +147,17 @@ exports.registerFaction = onCall(
       throw new HttpsError("unauthenticated", "You must be signed in.");
     }
 
+    // Defense in depth: email/password accounts must have a verified email
+    // before they can register/join a faction. Google sign-in is verified.
+    const token = request.auth.token || {};
+    const provider = token.firebase && token.firebase.sign_in_provider;
+    if (provider === "password" && !token.email_verified) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Please verify your email address before connecting your faction."
+      );
+    }
+
     const uid = request.auth.uid;
     const apiKey = (request.data.apiKey || "").trim();
 

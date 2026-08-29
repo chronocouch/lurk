@@ -56,6 +56,20 @@
   </div>
 </div>
 
+<!-- ═══ EMAIL VERIFICATION ═══ -->
+<div id="screen-verify" class="landing" style="display:none">
+  <div class="landing-logo">✉️</div>
+  <h1>Verify your email</h1>
+  <p class="tagline">We sent a verification link to <strong id="verify-email">your email</strong>. Click it, then come back and continue.</p>
+  <div class="landing-card">
+    <p>Verifying your email keeps Lurk accounts trustworthy before you're added to a faction.</p>
+    <div class="onboard-error" id="verify-msg" style="display:none"></div>
+    <button class="onboard-btn" onclick="checkVerification()">I've verified — continue</button>
+    <button class="onboard-btn secondary" style="margin-top:8px" onclick="resendVerification()">Resend email</button>
+    <button class="auth-btn" style="margin-top:12px" onclick="signOut()">Sign out</button>
+  </div>
+</div>
+
 <!-- ═══ ONBOARDING ═══ -->
 <div id="screen-onboarding" class="onboarding" style="display:none">
   <div class="onboard-card">
@@ -371,6 +385,12 @@ const FIREBASE_CONFIG = {
   measurementId: "G-W4LY33WB7V"
 };
 const IS_CONFIGURED = FIREBASE_CONFIG.apiKey !== "YOUR_API_KEY";
+// App Check (reCAPTCHA v3). Paste the site key from Firebase Console →
+// App Check → register this web app. Until a real key is set, App Check
+// stays off and nothing changes. Enforce it from the console once the
+// App Check metrics show your traffic as verified.
+const APPCHECK_SITE_KEY = "YOUR_RECAPTCHA_SITE_KEY";
+const APPCHECK_ENABLED = APPCHECK_SITE_KEY !== "YOUR_RECAPTCHA_SITE_KEY";
 let auth=null,db=null,functions=null,firebaseReady=false,_fb={};
 try {
   const aM=await import('https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js');
@@ -379,9 +399,17 @@ try {
   const nM=await import('https://www.gstatic.com/firebasejs/11.0.1/firebase-functions.js');
   if(IS_CONFIGURED){
     const app=aM.initializeApp(FIREBASE_CONFIG);
+    // App Check must init right after the app, before auth/firestore/functions use.
+    if(APPCHECK_ENABLED){
+      try{
+        const cM=await import('https://www.gstatic.com/firebasejs/11.0.1/firebase-app-check.js');
+        cM.initializeAppCheck(app,{provider:new cM.ReCaptchaV3Provider(APPCHECK_SITE_KEY),isTokenAutoRefreshEnabled:true});
+      }catch(e){console.error('App Check init failed:',e)}
+    }
     auth=uM.getAuth(app);db=fM.getFirestore(app);functions=nM.getFunctions(app);firebaseReady=true;
     _fb={onAuthStateChanged:uM.onAuthStateChanged,signInWithPopup:uM.signInWithPopup,GoogleAuthProvider:uM.GoogleAuthProvider,
       signInWithEmailAndPassword:uM.signInWithEmailAndPassword,createUserWithEmailAndPassword:uM.createUserWithEmailAndPassword,
+      sendEmailVerification:uM.sendEmailVerification,
       fbSignOut:uM.signOut,doc:fM.doc,getDoc:fM.getDoc,setDoc:fM.setDoc,collection:fM.collection,getDocs:fM.getDocs,
       onSnapshot:fM.onSnapshot,deleteField:fM.deleteField,httpsCallable:nM.httpsCallable};
   }
@@ -414,7 +442,7 @@ const FL_TIMES={"Mexico":1560,"Canada":2220,"Cayman Islands":3420,"Hawaii":7260,
 const FL_METHOD_MULT={standard:1,airstrip:0.70,wlt:0.50};
 
 function showScreen(id){
-  ['screen-loading','screen-landing','screen-onboarding','screen-app'].forEach(s=>{
+  ['screen-loading','screen-landing','screen-verify','screen-onboarding','screen-app'].forEach(s=>{
     document.getElementById(s).style.display=s===id?'':'none';
   });
   if(id==='screen-app')document.getElementById('screen-app').style.display='block';
@@ -437,7 +465,24 @@ window.createAccountWithEmail=async function(){
   const e=document.getElementById('email-input').value.trim(),p=document.getElementById('password-input').value,err=document.getElementById('email-error');
   err.style.display='none';
   if(p.length<6){err.textContent='Password must be at least 6 characters.';err.style.display='block';return}
-  try{await _fb.createUserWithEmailAndPassword(auth,e,p)}catch(x){err.textContent=x.message.replace('Firebase: ','');err.style.display='block'}
+  try{
+    const cred=await _fb.createUserWithEmailAndPassword(auth,e,p);
+    try{await _fb.sendEmailVerification(cred.user)}catch(v){console.warn('verification email failed',v)}
+    // onAuthStateChanged will now route to the verify screen (unverified).
+  }catch(x){err.textContent=x.message.replace('Firebase: ','');err.style.display='block'}
+};
+window.resendVerification=async function(){
+  const msg=document.getElementById('verify-msg');
+  if(!currentUser)return;
+  try{await _fb.sendEmailVerification(currentUser);msg.textContent='Verification email sent. Check your inbox (and spam).';msg.style.display='block'}
+  catch(x){msg.textContent=(x.message||'Could not send email.').replace('Firebase: ','');msg.style.display='block'}
+};
+window.checkVerification=async function(){
+  const msg=document.getElementById('verify-msg');
+  if(!currentUser)return;
+  try{await currentUser.reload();}catch(e){}
+  if(currentUser.emailVerified){location.reload()}
+  else{msg.textContent='Not verified yet — click the link in the email, then try again.';msg.style.display='block'}
 };
 window.signOut=async function(){
   if(wbUnsubStatus){wbUnsubStatus();wbUnsubStatus=null}
@@ -1332,6 +1377,11 @@ else if(firebaseReady){
   _fb.onAuthStateChanged(auth,async user=>{
     if(!user){currentUser=null;showScreen('screen-landing');return}
     currentUser=user;
+    // Email/password accounts must verify first (Google sign-in is already verified).
+    if(!user.emailVerified){
+      const ve=document.getElementById('verify-email');if(ve&&user.email)ve.textContent=user.email;
+      showScreen('screen-verify');return;
+    }
     try{
       const ud=await _fb.getDoc(_fb.doc(db,'users',user.uid));
       const banner=document.getElementById('reconnect-banner');
