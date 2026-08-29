@@ -2,7 +2,7 @@
 
 Multi-tenant Firebase web app providing activity intelligence for Torn City factions. Evolved from a single-faction tool ("Underworld Availability") into a public SaaS where any faction leader signs up by connecting their Torn API key.
 
-**Live at:** https://lurk-e154e.web.app
+**Live at:** https://lurker.web.app (also https://lurk-e154e.web.app — both hosting sites serve the same app; see `firebase.json` hosting array)
 **Firebase project ID:** `lurk-e154e`
 **Region:** `us-central1`
 **Plan:** Blaze (required for Cloud Functions)
