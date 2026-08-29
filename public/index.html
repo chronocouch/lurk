@@ -452,8 +452,8 @@ const APPCHECK_ENABLED = APPCHECK_SITE_KEY !== "YOUR_RECAPTCHA_SITE_KEY";
 // Support / donations (home page). Fill these in to show the buttons;
 // each stays hidden while blank, and the whole section hides if both are blank.
 const SUPPORT = {
-  tornId: "",     // your Torn player ID, e.g. "2345678"
-  kofiUrl: "",    // e.g. "https://ko-fi.com/yourname" (or Buy Me a Coffee URL)
+  tornId: "3239065",                    // Torn player ID → profile "Send Money"/trade
+  kofiUrl: "https://ko-fi.com/neoncouch", // cash tips
 };
 let auth=null,db=null,functions=null,firebaseReady=false,_fb={};
 try {
@@ -587,6 +587,7 @@ window.updateApiKey=async function(){
   catch(e){alert('Failed: '+e.message)}
 };
 
+const WB_TABS=['home','heatmap','warbuddy','flights','settings'];
 window.switchTab=function(t){
   document.querySelectorAll('.nav-tab').forEach(b=>b.classList.toggle('active',b.dataset.tab===t));
   document.querySelectorAll('.content-frame').forEach(f=>f.classList.toggle('active',f.id==='tab-'+t));
@@ -594,6 +595,8 @@ window.switchTab=function(t){
   // Dismiss any active heatmap tooltip when switching tabs
   hideHmTooltip();
   window.scrollTo(0,0);
+  // Remember the last tab so returning users land where they left off.
+  try{localStorage.setItem('lurk_lastTab',t)}catch(e){}
 };
 // Populate the home-page support buttons from the SUPPORT config.
 function wireSupport(){
@@ -627,6 +630,13 @@ function enterApp(){
   document.getElementById('settings-faction-id').textContent=userFactionId||'—';
   showScreen('screen-app');initHeatmap().then(()=>{intelInit();initWarBuddy().then(()=>intelTryShow())});
   initFlights();
+  // First-time visitors land on Home; returning users resume their last tab.
+  let dest='heatmap';
+  try{
+    if(!localStorage.getItem('lurk_seen')){dest='home';localStorage.setItem('lurk_seen','1')}
+    else{const last=localStorage.getItem('lurk_lastTab');if(last&&WB_TABS.includes(last))dest=last}
+  }catch(e){}
+  switchTab(dest);
 }
 
 // ─── HELPERS ───
