@@ -288,6 +288,7 @@
             <label>Sort</label>
             <select id="wb-sort-select" onchange="wbOnSortChange()">
               <option value="attackable">Next Attackable</option>
+              <option value="weakest">Weakest (est.)</option>
               <option value="status">Status Priority</option>
               <option value="name">Name</option>
               <option value="level">Level</option>
@@ -448,6 +449,12 @@
           <button class="onboard-btn" onclick="updateApiKey()" style="max-width:200px">Update Key</button>
         </div>
         <div class="settings-section">
+          <h3>FF Scouter (opponent stats)</h3>
+          <p>Optional. Add an <a href="https://ffscouter.com" target="_blank" rel="noopener">FFScouter</a> key (a Torn API key works) to show estimated opponent battle stats and Fair Fight on War Buddy during wars. Owner only.</p>
+          <div class="input-group"><input type="text" id="settings-scouter-key" placeholder="Paste FFScouter / Torn key…" autocomplete="off" spellcheck="false"></div>
+          <button class="onboard-btn" onclick="updateScouterKey()" style="max-width:200px">Save Scouter Key</button>
+        </div>
+        <div class="settings-section">
           <h3>Account</h3>
           <p>Manage your account.</p>
           <button class="settings-btn-danger" onclick="signOut()">Sign Out</button>
@@ -521,7 +528,7 @@ let hmPatterns={},hmMeta={},hmMemberInfo={},hmViewOffset=0,hmCurrentView='peacet
 let hmPeacetimePatterns={},hmPeacetimeMeta={},hmWartimePatterns={},hmWartimeMeta={};
 let hmOpponentPatterns={},hmOpponentMeta={},hmOpponentFactionName='';
 let wbOpponents={},wbTrackingActive=false,wbOpponentFactionName='',wbLastPoll=0,wbExpectedOppId=null,wbCollecting=false;
-let wbTargeting={},wbUnsubTargeting=null,wbSortTouched=false;
+let wbTargeting={},wbUnsubTargeting=null,wbSortTouched=false,wbOwnStats=null;
 let wbCountdownInterval=null,wbUnsubStatus=null,wbUnsubEvents=null;
 let wbActiveFilter=null;       // 'okay' | 'returning' | 'traveling_out' | 'abroad' | 'hospital' | null
 let wbImminentOppId=null;      // currently most-imminent returning opponent
@@ -613,6 +620,15 @@ window.updateApiKey=async function(){
   if(!k||k.length<10)return alert('Enter a valid API key.');
   try{const fn=_fb.httpsCallable(functions,'registerFaction');const r=await fn({apiKey:k});alert('Updated for '+r.data.factionName);document.getElementById('settings-api-key').value=''}
   catch(e){alert('Failed: '+e.message)}
+};
+window.updateScouterKey=async function(){
+  const k=document.getElementById('settings-scouter-key').value.trim();
+  try{
+    const fn=_fb.httpsCallable(functions,'setScouterKey');
+    const r=await fn({key:k});
+    alert(r.data.cleared?'Scouter key cleared.':'Scouter key saved — opponent stats will appear on the next war poll.');
+    document.getElementById('settings-scouter-key').value='';
+  }catch(e){alert('Failed: '+(e.message||'unknown error'))}
 };
 
 const WB_TABS=['home','heatmap','warbuddy','flights','settings'];
@@ -919,7 +935,7 @@ function wbSubscribe(){
     // Ignore a stale status doc still holding the previous opponent — wait for
     // the poll that matches the faction we just started tracking.
     if(wbExpectedOppId&&Number(d.opponentFactionId)!==Number(wbExpectedOppId))return;
-    wbCollecting=false;wbOpponents=d.opponents||{};wbOpponentFactionName=d.opponentFactionName||'';wbLastPoll=d.lastPoll||0;wbSyncBadge(true);wbRenderMeta(d);wbRenderSummary();wbRenderOpponents()});
+    wbCollecting=false;wbOpponents=d.opponents||{};wbOpponentFactionName=d.opponentFactionName||'';wbLastPoll=d.lastPoll||0;wbOwnStats=d.ownStats||null;wbSyncBadge(true);wbRenderMeta(d);wbRenderSummary();wbRenderOpponents()});
   wbUnsubEvents=_fb.onSnapshot(_fb.doc(db,base,'events'),s=>{if(!s.exists())return;wbRenderEvents(s.data().events||[])});
   wbUnsubTargeting=_fb.onSnapshot(_fb.doc(db,base,'targeting'),s=>{wbTargeting=s.exists()?(s.data().opponents||{}):{};wbRenderOpponents()});
 }
@@ -940,7 +956,8 @@ window.wbToggleEventLog=function(){
   document.getElementById('wb-event-log').classList.toggle('collapsed');
 };
 function wbSyncBadge(a){const d=document.getElementById('wb-sync-dot'),t=document.getElementById('wb-sync-text');if(a){d.className='dot';t.textContent=wbCollecting?'Collecting…':'Tracking · '+Object.keys(wbOpponents).length+' opponents'}else{d.className='dot off';t.textContent='Inactive'}}
-function wbRenderMeta(d){document.getElementById('wb-meta-bar').innerHTML=d?`<div class="meta-item">Faction <span class="meta-value">${wbOpponentFactionName}</span></div><div class="meta-item">Opponents <span class="meta-value">${d.memberCount||'?'}</span></div><div class="meta-item">Last poll <span class="meta-value">${wbLastPoll?timeAgo(wbLastPoll):'—'}</span></div>`:'';}
+function wbNum(n){n=Math.round(n||0);if(n>=1e9)return(n/1e9).toFixed(2)+'b';if(n>=1e6)return(n/1e6).toFixed(1)+'m';if(n>=1e3)return(n/1e3).toFixed(0)+'k';return String(n)}
+function wbRenderMeta(d){const own=wbOwnStats&&wbOwnStats.total?`<div class="meta-item">Your stats <span class="meta-value">${wbNum(wbOwnStats.total)}</span></div>`:'';document.getElementById('wb-meta-bar').innerHTML=d?`<div class="meta-item">Faction <span class="meta-value">${wbOpponentFactionName}</span></div><div class="meta-item">Opponents <span class="meta-value">${d.memberCount||'?'}</span></div>${own}<div class="meta-item">Last poll <span class="meta-value">${wbLastPoll?timeAgo(wbLastPoll):'—'}</span></div>`:'';}
 
 // ─── Filter chips: tap a summary card to filter the opponent list ───
 window.wbSetFilter=function(state){
@@ -980,6 +997,7 @@ window.wbRenderOpponents=function(){
   }
   const now=Math.floor(Date.now()/1000);
   if(sm==='attackable')sorted.sort((a,b)=>wbNextAttackable(a,now)-wbNextAttackable(b,now)||a.name.localeCompare(b.name));
+  else if(sm==='weakest')sorted.sort((a,b)=>{const av=a.bsEstimate!=null?a.bsEstimate:Infinity,bv=b.bsEstimate!=null?b.bsEstimate:Infinity;return av-bv||a.name.localeCompare(b.name)});
   else if(sm==='status')sorted.sort((a,b)=>(STATUS_PRI[a.travelState]??7)-(STATUS_PRI[b.travelState]??7)||a.name.localeCompare(b.name));
   else if(sm==='name')sorted.sort((a,b)=>a.name.localeCompare(b.name));else sorted.sort((a,b)=>b.level-a.level);
   list.innerHTML='';
@@ -993,6 +1011,7 @@ window.wbRenderOpponents=function(){
     sc.innerHTML=`<div class="status-chip ${chipClass(opp.travelState)}"><span class="dot"></span>${statusLabel(opp.travelState)}</div>${atk?`<a href="https://www.torn.com/loader.php?sid=attack&user2ID=${opp.id}" target="_blank" class="attack-btn-inline attackable">⚔ Attack</a>`:''}`;
     const _secs=wbNextAttackable(opp,now);
     if(_secs>0&&_secs!==Infinity){const _c=wbCatch(opp.id,opp,now);sc.innerHTML+=`<div class="wb-catch ${_c.tier}" title="${wbCatchTip(_c).replace(/"/g,'&quot;')}">${CATCH_ICON[_c.tier]} ${CATCH_LABEL[_c.tier]}</div>`}
+    if(opp.bsEstimate!=null){const beatable=wbOwnStats&&wbOwnStats.total?opp.bsEstimate<wbOwnStats.total:null;const cls=beatable===true?'beatable':beatable===false?'dangerous':'unknown';const ff=opp.fairFight!=null?' · FF '+opp.fairFight.toFixed(1):'';const age=opp.statsUpdated?' (est. '+timeAgo(opp.statsUpdated)+')':'';sc.innerHTML+=`<div class="wb-stat ${cls}" title="Estimated battle stats${age}${beatable===false?' — stronger than you':beatable===true?' — beatable':''}">💪 ${opp.bsHuman||wbNum(opp.bsEstimate)}${ff}</div>`}
     const tc=document.createElement('div');tc.className='travel-cell';
     if(opp.travelState==='returning'||opp.travelState==='traveling_out'){
       const dest=opp.destination||opp.lastKnownDestination||'Unknown';const dep=opp.travelState==='returning'?opp.returnDepartedAt:opp.departedAt;const std=lookupFlight(dest);

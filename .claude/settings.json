@@ -34,8 +34,8 @@
       "Bash(git reset --hard:*)",
       "Bash(firebase firestore:delete:*)",
       "Bash(gcloud:*)",
-      "Bash(curl:* | sh)",
-      "Bash(curl:* | bash)",
+      "Bash(curl * | sh)",
+      "Bash(curl * | bash)",
       "Bash(sudo:*)"
     ],
     "ask": [

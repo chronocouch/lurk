@@ -134,6 +134,11 @@ function decryptApiKey(stored) {
   return Buffer.from(stored, 'base64').toString('utf8').split('').reverse().join('');
 }
 
+// Battle Stat Score = √str + √def + √spd + √dex (the scale FFScouter uses).
+function bssScore(str, def, spd, dex) {
+  return Math.sqrt(str || 0) + Math.sqrt(def || 0) + Math.sqrt(spd || 0) + Math.sqrt(dex || 0);
+}
+
 // ══════════════════════════════════════════════════════════════
 //  CALLABLE: Register / update a faction
 //  Called from the frontend after auth + API key entry.
@@ -442,6 +447,50 @@ exports.detectWar = onCall(
       warStarted: warStart > 0 && warStart <= now,
       secondsUntilStart: warStart > now ? warStart - now : 0,
     };
+  }
+);
+
+
+// ══════════════════════════════════════════════════════════════
+//  CALLABLE: Set / clear the FFScouter API key (owner only)
+//  Stored obfuscated in internal/config; used server-side to pull
+//  opponent battle-stat estimates during a war. Never exposed to clients.
+// ══════════════════════════════════════════════════════════════
+exports.setScouterKey = onCall(
+  { memory: "256MiB", cors: true },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "You must be signed in.");
+
+    const uid = request.auth.uid;
+    const userDoc = await db.collection("users").doc(uid).get();
+    if (!userDoc.exists) throw new HttpsError("not-found", "No faction registered.");
+    const { factionId, role } = userDoc.data();
+    if (!factionId) throw new HttpsError("failed-precondition", "You're not in a faction.");
+    if (role !== "owner") throw new HttpsError("permission-denied", "Only the faction owner can set the scouter key.");
+
+    const key = (request.data.key || "").trim();
+    const configRef = db.collection("factions").doc(String(factionId)).collection("internal").doc("config");
+
+    if (!key) {
+      await configRef.set({ scouterKey: FieldValue.delete() }, { merge: true });
+      return { success: true, cleared: true };
+    }
+    if (key.length < 8) throw new HttpsError("invalid-argument", "That doesn't look like a valid key.");
+
+    // Validate it actually works against FFScouter before saving.
+    try {
+      const res = await fetch(`https://ffscouter.com/api/v1/get-stats?key=${key}&targets=1`);
+      const data = await res.json();
+      if (data && data.error) {
+        throw new HttpsError("permission-denied", "FFScouter rejected that key.");
+      }
+    } catch (e) {
+      if (e instanceof HttpsError) throw e;
+      throw new HttpsError("unavailable", "Couldn't reach FFScouter to validate the key.");
+    }
+
+    await configRef.set({ scouterKey: encryptApiKey(key) }, { merge: true });
+    return { success: true };
   }
 );
 
@@ -897,11 +946,54 @@ async function pollOpponents(factionRef, apiKey, opponentFactionId, now) {
     };
   }
 
+  // ── Battle-stat intel (best-effort) ──
+  // Owner's own stats via Torn, opponent estimates via FFScouter (one
+  // batched call). Both are optional — a missing scouter key or a hiccup
+  // just leaves the fields empty.
+  let ownStats = null;
+  try {
+    const bsRes = await fetch(`https://api.torn.com/user/?selections=battlestats&key=${apiKey}`);
+    const bs = await bsRes.json();
+    if (!bs.error && bs.total != null) {
+      ownStats = {
+        strength: bs.strength, defense: bs.defense, speed: bs.speed, dexterity: bs.dexterity,
+        total: bs.total, bss: Math.round(bssScore(bs.strength, bs.defense, bs.speed, bs.dexterity)),
+        updated: now,
+      };
+    }
+  } catch (e) { console.error("own battlestats fetch failed:", e); }
+
+  try {
+    const cfg = await factionRef.collection("internal").doc("config").get();
+    const scouterKey = cfg.exists && cfg.data().scouterKey ? decryptApiKey(cfg.data().scouterKey) : null;
+    if (scouterKey) {
+      const ids = Object.keys(opponents);
+      for (let i = 0; i < ids.length; i += 200) {
+        const batch = ids.slice(i, i + 200);
+        const ffRes = await fetch(
+          `https://ffscouter.com/api/v1/get-stats?key=${scouterKey}&targets=${batch.join(",")}`
+        );
+        const arr = await ffRes.json();
+        if (Array.isArray(arr)) {
+          for (const p of arr) {
+            const o = opponents[String(p.player_id)];
+            if (!o) continue;
+            o.bsEstimate = p.bs_estimate != null ? p.bs_estimate : null;
+            o.bsHuman = p.bs_estimate_human || null;
+            o.fairFight = p.fair_fight != null ? p.fair_fight : null;
+            o.statsUpdated = p.last_updated || null;
+          }
+        }
+      }
+    }
+  } catch (e) { console.error("FFScouter fetch failed:", e); }
+
   // Write status
   await warRef.doc("status").set({
     opponents,
     opponentFactionId,
     opponentFactionName: factionData.name || "Unknown",
+    ownStats,
     lastPoll: now,
     memberCount: Object.keys(opponents).length,
     travelingCount: travelingIds.length,
