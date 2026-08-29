@@ -674,9 +674,11 @@ input[type="text"] { width:140px; }
   font-size:10px; font-weight:600; padding:2px 7px; border-radius:10px; white-space:nowrap;
   border:1px solid var(--border); background:var(--surface2); color:var(--text-dim);
 }
-.wb-stat.beatable { color:var(--active); border-color:rgba(52,211,153,0.4); background:var(--active-bg); }
-.wb-stat.dangerous { color:var(--danger); border-color:rgba(248,113,113,0.4); background:var(--danger-bg); }
-.wb-stat.unknown { color:var(--text-dim); }
+.wb-stat.ff-easy { color:var(--active); border-color:rgba(52,211,153,0.35); }
+.wb-stat.ff-prime { color:var(--active); border-color:rgba(52,211,153,0.5); background:var(--active-bg); }
+.wb-stat.ff-tough { color:var(--awake); border-color:rgba(251,191,36,0.4); background:var(--awake-bg); }
+.wb-stat.ff-hard { color:var(--danger); border-color:rgba(248,113,113,0.45); background:var(--danger-bg); }
+.wb-stat.ff-unknown { color:var(--text-dim); }
 .status-chip {
   display:inline-flex; align-items:center; gap:6px;
   font-size:12px; font-weight:500; padding:5px 10px;

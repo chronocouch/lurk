@@ -887,6 +887,28 @@ const CATCH_ICON={high:'🎯',med:'◑',low:'○',bagger:'🛡'};
 const CATCH_LABEL={high:'Likely catchable',med:'Maybe',low:'Low odds',bagger:'Usually bags'};
 function wbCatchTip(c){const p=[];if(!c.thin){p.push('Lapses '+Math.round(c.exposure*100)+'% · avg window '+(c.dwellMin>=1?c.dwellMin.toFixed(0)+'m':'<1m')+(c.afkRate>0?' · AFK '+Math.round(c.afkRate*100)+'%':''))}else{p.push('Building history')}p.push('Now: '+c.live);if(c.zone)p.push('Heatmap: '+c.zone+(c.zone==='inactive'?' (dead zone)':''));return p.join(' · ')}
 window.wbOnSortChange=function(){wbSortTouched=true;wbRenderOpponents()};
+// Fair Fight band. FF = 1 + 8/3 × (their BSS ÷ your BSS): <3 weaker than
+// you, 3 = Torn respect cap, 3.67 = even, >3.67 stronger, ~5 ≈ 2.25× you.
+function wbFFBand(ff){
+  if(ff==null)return{cls:'unknown',label:''};
+  if(ff<3)return{cls:'easy',label:'easy'};
+  if(ff<3.7)return{cls:'prime',label:'⭐ prime'};
+  if(ff<5)return{cls:'tough',label:'tough'};
+  return{cls:'hard',label:'hard'};
+}
+function wbStatTip(o){
+  const p=[];
+  if(o.fairFight!=null){
+    const ratio=Math.pow((o.fairFight-1)/(8/3),2); // their total stats ÷ yours
+    const rel=ratio>=1?'~'+ratio.toFixed(1)+'× your stats':'~'+Math.round(ratio*100)+'% of your stats';
+    const meaning=o.fairFight<3?'weaker than you':o.fairFight<3.7?'near your level (max war respect)':o.fairFight<5?'stronger than you':'much stronger';
+    p.push('FF '+o.fairFight.toFixed(2)+' — '+meaning+' ('+rel+')');
+  }
+  if(o.bsEstimate!=null)p.push('Est. stats '+(o.bsHuman||wbNum(o.bsEstimate)));
+  if(o.statsUpdated)p.push('updated '+timeAgo(o.statsUpdated));
+  p.push('FF is vs your stats · 3.0 = Torn respect cap · 3.67 = even');
+  return p.join(' · ');
+}
 
 async function initWarBuddy(){
   if(!userFactionId)return;
@@ -1011,7 +1033,7 @@ window.wbRenderOpponents=function(){
     sc.innerHTML=`<div class="status-chip ${chipClass(opp.travelState)}"><span class="dot"></span>${statusLabel(opp.travelState)}</div>${atk?`<a href="https://www.torn.com/loader.php?sid=attack&user2ID=${opp.id}" target="_blank" class="attack-btn-inline attackable">⚔ Attack</a>`:''}`;
     const _secs=wbNextAttackable(opp,now);
     if(_secs>0&&_secs!==Infinity){const _c=wbCatch(opp.id,opp,now);sc.innerHTML+=`<div class="wb-catch ${_c.tier}" title="${wbCatchTip(_c).replace(/"/g,'&quot;')}">${CATCH_ICON[_c.tier]} ${CATCH_LABEL[_c.tier]}</div>`}
-    if(opp.bsEstimate!=null){const beatable=wbOwnStats&&wbOwnStats.total?opp.bsEstimate<wbOwnStats.total:null;const cls=beatable===true?'beatable':beatable===false?'dangerous':'unknown';const ff=opp.fairFight!=null?' · FF '+opp.fairFight.toFixed(1):'';const age=opp.statsUpdated?' (est. '+timeAgo(opp.statsUpdated)+')':'';sc.innerHTML+=`<div class="wb-stat ${cls}" title="Estimated battle stats${age}${beatable===false?' — stronger than you':beatable===true?' — beatable':''}">💪 ${opp.bsHuman||wbNum(opp.bsEstimate)}${ff}</div>`}
+    if(opp.bsEstimate!=null||opp.fairFight!=null){const band=wbFFBand(opp.fairFight);const stat=opp.bsHuman||(opp.bsEstimate!=null?wbNum(opp.bsEstimate):'?');const ffTxt=opp.fairFight!=null?' · FF '+opp.fairFight.toFixed(1):'';const lbl=band.label?' · '+band.label:'';sc.innerHTML+=`<div class="wb-stat ff-${band.cls}" title="${wbStatTip(opp).replace(/"/g,'&quot;')}">💪 ${stat}${ffTxt}${lbl}</div>`}
     const tc=document.createElement('div');tc.className='travel-cell';
     if(opp.travelState==='returning'||opp.travelState==='traveling_out'){
       const dest=opp.destination||opp.lastKnownDestination||'Unknown';const dep=opp.travelState==='returning'?opp.returnDepartedAt:opp.departedAt;const std=lookupFlight(dest);
