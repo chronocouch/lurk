@@ -125,12 +125,14 @@
       </div>
     </div>
     <div class="nav-right">
+      <button class="nav-donate" onclick="goDonate()" title="Support Lurk">☕ <span class="donate-label">Donate</span></button>
       <span class="nav-faction" id="nav-faction-name"></span>
       <button class="nav-user-btn" onclick="toggleProfileMenu(event)">
         <span class="user-label">Sign out</span>
       </button>
       <div class="profile-menu" id="profile-menu">
         <div class="menu-faction">Faction<strong id="menu-faction-name">—</strong></div>
+        <button onclick="goDonate();closeProfileMenu()">☕ Support Lurk</button>
         <button onclick="switchTab('settings');closeProfileMenu()">⚙ Settings</button>
         <button onclick="signOut()">↩ Sign out</button>
       </div>
@@ -597,6 +599,12 @@ window.switchTab=function(t){
   window.scrollTo(0,0);
   // Remember the last tab so returning users land where they left off.
   try{localStorage.setItem('lurk_lastTab',t)}catch(e){}
+};
+// Header "Donate" → Home page, scrolled to the Support section.
+window.goDonate=function(){
+  switchTab('home');
+  const s=document.getElementById('home-support');
+  if(s&&s.style.display!=='none')setTimeout(()=>s.scrollIntoView({behavior:'smooth',block:'start'}),50);
 };
 // Populate the home-page support buttons from the SUPPORT config.
 function wireSupport(){
