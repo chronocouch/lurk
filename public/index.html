@@ -471,10 +471,10 @@ const FIREBASE_CONFIG = {
   measurementId: "G-W4LY33WB7V"
 };
 const IS_CONFIGURED = FIREBASE_CONFIG.apiKey !== "YOUR_API_KEY";
-// App Check (reCAPTCHA v3). Paste the site key from Firebase Console →
-// App Check → register this web app. Until a real key is set, App Check
-// stays off and nothing changes. Enforce it from the console once the
-// App Check metrics show your traffic as verified.
+// App Check (reCAPTCHA Enterprise). Paste the reCAPTCHA Enterprise site
+// key registered in Firebase Console → App Check. Until a real key is
+// set, App Check stays off and nothing changes. Enforce it from the
+// console once App Check metrics show your traffic as verified.
 const APPCHECK_SITE_KEY = "YOUR_RECAPTCHA_SITE_KEY";
 const APPCHECK_ENABLED = APPCHECK_SITE_KEY !== "YOUR_RECAPTCHA_SITE_KEY";
 // Support / donations (home page). Fill these in to show the buttons;
@@ -495,7 +495,7 @@ try {
     if(APPCHECK_ENABLED){
       try{
         const cM=await import('https://www.gstatic.com/firebasejs/11.0.1/firebase-app-check.js');
-        cM.initializeAppCheck(app,{provider:new cM.ReCaptchaV3Provider(APPCHECK_SITE_KEY),isTokenAutoRefreshEnabled:true});
+        cM.initializeAppCheck(app,{provider:new cM.ReCaptchaEnterpriseProvider(APPCHECK_SITE_KEY),isTokenAutoRefreshEnabled:true});
       }catch(e){console.error('App Check init failed:',e)}
     }
     auth=uM.getAuth(app);db=fM.getFirestore(app);functions=nM.getFunctions(app);firebaseReady=true;
