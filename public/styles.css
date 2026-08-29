@@ -638,7 +638,7 @@ input[type="text"] { width:140px; }
 .opponent-list { display:flex; flex-direction:column; gap:2px; }
 
 .opponent-row {
-  display:grid; grid-template-columns:200px 110px 1fr 140px;
+  display:grid; grid-template-columns:200px minmax(180px, max-content) 1fr 140px;
   align-items:center;
   background:var(--surface); border:1px solid var(--border);
   border-radius:10px; overflow:hidden; transition:all .2s;
