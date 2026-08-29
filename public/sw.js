@@ -5,7 +5,7 @@
    live-data app and stale data is worse than no data.
    ═══════════════════════════════════════════════════════════════ */
 
-const CACHE_NAME = 'lurk-shell-v1';
+const CACHE_NAME = 'lurk-shell-v2';
 const SHELL_ASSETS = [
   '/',
   '/index.html',
