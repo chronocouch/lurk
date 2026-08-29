@@ -106,7 +106,7 @@
 
   <nav class="app-nav">
     <div class="nav-left">
-      <a href="#" class="nav-brand" onclick="switchTab('heatmap');return false">
+      <a href="#" class="nav-brand" onclick="switchTab('home');return false">
         <span class="brand-emoji">📡</span> <span class="brand-text">Lurk</span>
       </a>
       <div class="nav-tabs">
@@ -138,6 +138,64 @@
   </nav>
 
   <div class="app-content">
+
+    <!-- ─── Home / overview tab ─── -->
+    <div class="content-frame" id="tab-home">
+      <div class="home-hero">
+        <div class="home-logo">📡</div>
+        <h1>Welcome to Lurk</h1>
+        <p class="home-tagline">War intelligence for Torn City factions. Lurk turns your faction's API data into timing you can act on — when people sleep, when they're vulnerable, and when to strike.</p>
+      </div>
+
+      <div class="home-section-label">What's inside</div>
+      <div class="home-grid">
+        <button class="home-card" onclick="switchTab('heatmap')">
+          <div class="home-card-icon">📊</div>
+          <div class="home-card-title">Activity</div>
+          <p>An hour-by-hour heatmap of when each member is active, awake, or asleep — built from real actions, not just online status. Flip to wartime patterns or an opponent's rhythm to find their dead zones.</p>
+          <span class="home-card-cta">Open Activity →</span>
+        </button>
+        <button class="home-card" onclick="switchTab('warbuddy')">
+          <div class="home-card-icon">⚔</div>
+          <div class="home-card-title">War Buddy</div>
+          <p>Live opponent tracking for ranked wars: flight and hospital countdowns, a "next attackable" list that floats targets up as they're about to become hittable, and a catchability read on whether they'll bag or lapse. Includes War Intel — coverage vs. the enemy and auto-flagged vulnerability windows.</p>
+          <span class="home-card-cta">Open War Buddy →</span>
+        </button>
+        <button class="home-card" onclick="switchTab('flights')">
+          <div class="home-card-icon">✈</div>
+          <div class="home-card-title">Flights</div>
+          <p>A money-making board of every foreign item ranked by expected profit per minute. Star what you fly for precise pricing, a fly window that warns when stock will run dry before you land, and a copy-ready bazaar list price for when you get home.</p>
+          <span class="home-card-cta">Open Flights →</span>
+        </button>
+        <button class="home-card" onclick="switchTab('settings')">
+          <div class="home-card-icon">⚙</div>
+          <div class="home-card-title">Settings</div>
+          <p>Your faction details and Torn API key — update or rotate it anytime. Your key is used only to poll the Torn API server-side and is never exposed to other users.</p>
+          <span class="home-card-cta">Open Settings →</span>
+        </button>
+      </div>
+
+      <div class="home-support" id="home-support" style="display:none">
+        <div class="home-section-label">Support Lurk</div>
+        <p class="home-support-intro">Lurk is free and built by one player. If it's helped your faction, a tip keeps it running — totally optional, and nothing is ever paywalled.</p>
+        <div class="home-support-grid">
+          <div class="home-support-card" id="support-torn-card" style="display:none">
+            <div class="home-card-icon">💊</div>
+            <div class="home-card-title">In Torn</div>
+            <p>Send a Xanax or some cash in-game — easiest way, zero fees.</p>
+            <a class="home-support-btn" id="support-torn" href="#" target="_blank" rel="noopener">Send in Torn →</a>
+          </div>
+          <div class="home-support-card" id="support-kofi-card" style="display:none">
+            <div class="home-card-icon">☕</div>
+            <div class="home-card-title">Buy me a coffee</div>
+            <p>Prefer real money? A small tip is hugely appreciated.</p>
+            <a class="home-support-btn" id="support-kofi" href="#" target="_blank" rel="noopener">Tip with Ko-fi →</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="home-footer">Lurk is an unofficial third-party tool. <a href="https://www.torn.com" target="_blank" rel="noopener">Torn City</a> is a game by Chedburn Networks.</div>
+    </div>
 
     <!-- ─── Heatmap tab ─── -->
     <div class="content-frame active" id="tab-heatmap">
@@ -391,6 +449,12 @@ const IS_CONFIGURED = FIREBASE_CONFIG.apiKey !== "YOUR_API_KEY";
 // App Check metrics show your traffic as verified.
 const APPCHECK_SITE_KEY = "YOUR_RECAPTCHA_SITE_KEY";
 const APPCHECK_ENABLED = APPCHECK_SITE_KEY !== "YOUR_RECAPTCHA_SITE_KEY";
+// Support / donations (home page). Fill these in to show the buttons;
+// each stays hidden while blank, and the whole section hides if both are blank.
+const SUPPORT = {
+  tornId: "",     // your Torn player ID, e.g. "2345678"
+  kofiUrl: "",    // e.g. "https://ko-fi.com/yourname" (or Buy Me a Coffee URL)
+};
 let auth=null,db=null,functions=null,firebaseReady=false,_fb={};
 try {
   const aM=await import('https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js');
@@ -529,7 +593,16 @@ window.switchTab=function(t){
   closeProfileMenu();
   // Dismiss any active heatmap tooltip when switching tabs
   hideHmTooltip();
+  window.scrollTo(0,0);
 };
+// Populate the home-page support buttons from the SUPPORT config.
+function wireSupport(){
+  let any=false;
+  if(SUPPORT.tornId){const a=document.getElementById('support-torn');a.href='https://www.torn.com/profiles.php?XID='+encodeURIComponent(SUPPORT.tornId);document.getElementById('support-torn-card').style.display='';any=true}
+  if(SUPPORT.kofiUrl){const a=document.getElementById('support-kofi');a.href=SUPPORT.kofiUrl;document.getElementById('support-kofi-card').style.display='';any=true}
+  if(any)document.getElementById('home-support').style.display='';
+}
+wireSupport();
 
 // ─── Profile menu (mobile) ───
 window.toggleProfileMenu=function(e){
