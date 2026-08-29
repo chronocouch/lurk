@@ -528,7 +528,7 @@ let hmPatterns={},hmMeta={},hmMemberInfo={},hmViewOffset=0,hmCurrentView='peacet
 let hmPeacetimePatterns={},hmPeacetimeMeta={},hmWartimePatterns={},hmWartimeMeta={};
 let hmOpponentPatterns={},hmOpponentMeta={},hmOpponentFactionName='';
 let wbOpponents={},wbTrackingActive=false,wbOpponentFactionName='',wbLastPoll=0,wbExpectedOppId=null,wbCollecting=false;
-let wbTargeting={},wbUnsubTargeting=null,wbSortTouched=false,wbOwnStats=null;
+let wbTargeting={},wbUnsubTargeting=null,wbSortTouched=false,wbOwnStats=null,wbScouterEnabled=false;
 let wbCountdownInterval=null,wbUnsubStatus=null,wbUnsubEvents=null;
 let wbActiveFilter=null;       // 'okay' | 'returning' | 'traveling_out' | 'abroad' | 'hospital' | null
 let wbImminentOppId=null;      // currently most-imminent returning opponent
@@ -957,7 +957,7 @@ function wbSubscribe(){
     // Ignore a stale status doc still holding the previous opponent — wait for
     // the poll that matches the faction we just started tracking.
     if(wbExpectedOppId&&Number(d.opponentFactionId)!==Number(wbExpectedOppId))return;
-    wbCollecting=false;wbOpponents=d.opponents||{};wbOpponentFactionName=d.opponentFactionName||'';wbLastPoll=d.lastPoll||0;wbOwnStats=d.ownStats||null;wbSyncBadge(true);wbRenderMeta(d);wbRenderSummary();wbRenderOpponents()});
+    wbCollecting=false;wbOpponents=d.opponents||{};wbOpponentFactionName=d.opponentFactionName||'';wbLastPoll=d.lastPoll||0;wbOwnStats=d.ownStats||null;wbScouterEnabled=!!d.scouterEnabled;wbSyncBadge(true);wbRenderMeta(d);wbRenderSummary();wbRenderOpponents()});
   wbUnsubEvents=_fb.onSnapshot(_fb.doc(db,base,'events'),s=>{if(!s.exists())return;wbRenderEvents(s.data().events||[])});
   wbUnsubTargeting=_fb.onSnapshot(_fb.doc(db,base,'targeting'),s=>{wbTargeting=s.exists()?(s.data().opponents||{}):{};wbRenderOpponents()});
 }
@@ -1034,6 +1034,8 @@ window.wbRenderOpponents=function(){
     const _secs=wbNextAttackable(opp,now);
     if(_secs>0&&_secs!==Infinity){const _c=wbCatch(opp.id,opp,now);sc.innerHTML+=`<div class="wb-catch ${_c.tier}" title="${wbCatchTip(_c).replace(/"/g,'&quot;')}">${CATCH_ICON[_c.tier]} ${CATCH_LABEL[_c.tier]}</div>`}
     if(opp.bsEstimate!=null||opp.fairFight!=null){const band=wbFFBand(opp.fairFight);const stat=opp.bsHuman||(opp.bsEstimate!=null?wbNum(opp.bsEstimate):'?');const ffTxt=opp.fairFight!=null?' · FF '+opp.fairFight.toFixed(1):'';const lbl=band.label?' · '+band.label:'';sc.innerHTML+=`<div class="wb-stat ff-${band.cls}" title="${wbStatTip(opp).replace(/"/g,'&quot;')}">💪 ${stat}${ffTxt}${lbl}</div>`}
+    else if(!wbScouterEnabled){sc.innerHTML+=`<div class="wb-stat ff-hint" onclick="switchTab('settings')" title="Add an FF Scouter key in Settings → to see estimated opponent stats &amp; Fair Fight.">💪 add FF key</div>`}
+    else{sc.innerHTML+=`<div class="wb-stat ff-unknown" title="No FF Scouter estimate for this player yet.">💪 ?</div>`}
     const tc=document.createElement('div');tc.className='travel-cell';
     if(opp.travelState==='returning'||opp.travelState==='traveling_out'){
       const dest=opp.destination||opp.lastKnownDestination||'Unknown';const dep=opp.travelState==='returning'?opp.returnDepartedAt:opp.departedAt;const std=lookupFlight(dest);

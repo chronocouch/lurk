@@ -963,9 +963,11 @@ async function pollOpponents(factionRef, apiKey, opponentFactionId, now) {
     }
   } catch (e) { console.error("own battlestats fetch failed:", e); }
 
+  let scouterEnabled = false;
   try {
     const cfg = await factionRef.collection("internal").doc("config").get();
     const scouterKey = cfg.exists && cfg.data().scouterKey ? decryptApiKey(cfg.data().scouterKey) : null;
+    scouterEnabled = !!scouterKey;
     if (scouterKey) {
       const ids = Object.keys(opponents);
       for (let i = 0; i < ids.length; i += 200) {
@@ -994,6 +996,7 @@ async function pollOpponents(factionRef, apiKey, opponentFactionId, now) {
     opponentFactionId,
     opponentFactionName: factionData.name || "Unknown",
     ownStats,
+    scouterEnabled,
     lastPoll: now,
     memberCount: Object.keys(opponents).length,
     travelingCount: travelingIds.length,

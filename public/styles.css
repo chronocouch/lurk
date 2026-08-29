@@ -678,7 +678,9 @@ input[type="text"] { width:140px; }
 .wb-stat.ff-prime { color:var(--active); border-color:rgba(52,211,153,0.5); background:var(--active-bg); }
 .wb-stat.ff-tough { color:var(--awake); border-color:rgba(251,191,36,0.4); background:var(--awake-bg); }
 .wb-stat.ff-hard { color:var(--danger); border-color:rgba(248,113,113,0.45); background:var(--danger-bg); }
-.wb-stat.ff-unknown { color:var(--text-dim); }
+.wb-stat.ff-unknown { color:var(--text-muted); }
+.wb-stat.ff-hint { color:var(--accent); border-color:rgba(108,156,252,0.35); border-style:dashed; cursor:pointer; }
+.wb-stat.ff-hint:hover { background:var(--accent-dim); border-color:var(--accent); }
 .status-chip {
   display:inline-flex; align-items:center; gap:6px;
   font-size:12px; font-weight:500; padding:5px 10px;
