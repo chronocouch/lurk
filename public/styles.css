@@ -138,6 +138,42 @@ input, select, textarea { font-size:16px; }
 }
 .landing-footer a { color:var(--accent); text-decoration:none; }
 
+/* Landing has more content now — flow from the top so nothing clips, and
+   tighten the tagline's big gap. (Other .landing screens stay centered.) */
+#screen-landing { justify-content:flex-start; padding-top:max(56px, var(--safe-top)); }
+#screen-landing .tagline { margin-bottom:32px; }
+.landing-info { width:100%; max-width:520px; text-align:left; margin-top:28px; }
+.li-features { display:grid; gap:12px; margin-bottom:8px; }
+.li-feature { display:flex; gap:12px; align-items:flex-start; }
+.li-ic { font-size:22px; line-height:1.2; flex:0 0 auto; }
+.li-feature strong { display:block; font-size:14px; color:var(--text); font-weight:600; }
+.li-feature p { font-size:12.5px; color:var(--text-dim); line-height:1.5; margin-top:2px; }
+.li-block { margin-top:28px; }
+.li-block h3 { font-size:15px; font-weight:600; color:var(--text); margin-bottom:12px; }
+.li-steps { list-style:none; counter-reset:li; display:flex; flex-direction:column; gap:12px; }
+.li-steps li { counter-increment:li; position:relative; padding-left:34px; font-size:13px; color:var(--text-dim); line-height:1.55; }
+.li-steps li::before {
+  content:counter(li); position:absolute; left:0; top:0;
+  width:23px; height:23px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+  font-size:12px; font-weight:700; color:var(--accent);
+  background:var(--accent-dim); border:1px solid rgba(108,156,252,0.35);
+}
+.li-steps strong, .li-need strong { color:var(--text); font-weight:600; }
+.li-steps em { color:var(--text); font-style:normal; font-weight:600; }
+.li-need { list-style:none; display:flex; flex-direction:column; gap:8px; }
+.li-need li { position:relative; padding-left:20px; font-size:13px; color:var(--text-dim); line-height:1.5; }
+.li-need li::before { content:'✓'; position:absolute; left:0; color:var(--active); font-weight:700; }
+.li-need a { color:var(--accent); text-decoration:none; }
+.li-note {
+  margin-top:14px; padding:12px 14px; border-radius:10px;
+  background:var(--surface2); border:1px solid var(--border);
+  font-size:12px; color:var(--text-dim); line-height:1.6;
+}
+@media (max-width:640px) {
+  #screen-landing { padding-top:max(40px, var(--safe-top)); }
+  .landing-info { max-width:100%; }
+}
+
 .onboarding {
   min-height:100vh;
   min-height:100dvh;
