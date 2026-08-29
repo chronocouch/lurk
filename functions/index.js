@@ -897,6 +897,14 @@ async function pollOpponents(factionRef, apiKey, opponentFactionId, now) {
     apiCallsUsed: 1 + travelingIds.length,
   });
 
+  // Accrue per-opponent "bag discipline" targeting stats (bag vs lapse,
+  // attackable dwell, AFK-at-expiry) for the catchability profile.
+  try {
+    await updateTargeting(warRef, opponents, prevOpponents, now);
+  } catch (e) {
+    console.error("targeting update failed:", e);
+  }
+
   // Log travel events
   const travelEvents = [];
   for (const [id, opp] of Object.entries(opponents)) {
@@ -981,6 +989,61 @@ async function pollOpponents(factionRef, apiKey, opponentFactionId, now) {
   console.log(
     `  War watch: ${Object.keys(opponents).length} opponents, ${travelingIds.length} traveling (${1 + travelingIds.length} API calls)`
   );
+}
+
+
+// ── Targeting: accrue per-opponent "bag discipline" ──────────
+// Compares the new opponent snapshot to the previous one and records:
+//   • bags        — proactive re-hosp (hospital `until` refreshed upward)
+//   • okayEntries — times they became attackable ("Okay" in Torn)
+//   • okayDwellSecTotal — total observed attackable time (your window)
+//   • afkOnEntry  — entries where last_action was not "Online"
+// The frontend turns these into a catchability score (lapse rate ×
+// avg dwell × AFK rate). Higher = a sloppier, more exploitable target.
+async function updateTargeting(warRef, opponents, prevOpponents, now) {
+  const doc = await warRef.doc("targeting").get();
+  const target = doc.exists ? doc.data().opponents || {} : {};
+
+  for (const [id, curr] of Object.entries(opponents)) {
+    const prev = prevOpponents[id] || {};
+    const t = target[id] || {
+      okayEntries: 0, okayDwellSecTotal: 0, afkOnEntry: 0, bags: 0,
+      okaySince: 0, events: [],
+    };
+
+    const currOkay = curr.travelState === "okay";
+    const prevOkay = prev.travelState === "okay";
+    const afkNow = (curr.lastActionStatus || "Offline") !== "Online";
+
+    // Proactive bag: still in hospital but the release time jumped up.
+    if (curr.travelState === "hospital" && prev.travelState === "hospital" &&
+        (curr.statusUntil || 0) > (prev.statusUntil || 0) + 30) {
+      t.bags++;
+      t.events.push({ t: now, type: "bag" });
+    }
+
+    // Became attackable (entry into "Okay").
+    if (currOkay && !prevOkay) {
+      t.okayEntries++;
+      t.okaySince = now;
+      if (afkNow) t.afkOnEntry++;
+      t.events.push({ t: now, type: "attackable", from: prev.travelState || "unknown", afk: afkNow });
+    }
+    // Left attackable — bank the dwell (bounded by poll cadence).
+    if (!currOkay && t.okaySince) {
+      t.okayDwellSecTotal += now - t.okaySince;
+      t.okaySince = 0;
+    }
+
+    if (t.events.length > 20) t.events = t.events.slice(-20);
+    t.name = curr.name;
+    t.lastState = curr.travelState;
+    t.lastUntil = curr.statusUntil || 0;
+    t.lastUpdated = now;
+    target[id] = t;
+  }
+
+  await warRef.doc("targeting").set({ opponents: target, lastUpdated: now });
 }
 
 
@@ -1415,6 +1478,73 @@ exports.onWarConfigChange = onDocumentWritten(
       console.log(`Immediate war poll: faction ${factionId} vs ${opponentFactionId}`);
     } catch (e) {
       console.error(`Immediate war poll failed for ${factionId}:`, e);
+    }
+  }
+);
+
+
+// ══════════════════════════════════════════════════════════════
+//  WAR RAPID POLL — runs every minute
+//  During an active war, when an opponent is within ~8 min of a
+//  hospital release or a landing, rapid-poll that faction so we catch
+//  bag-vs-lapse (and their live presence) at ~1-min resolution instead
+//  of every 15 min. Does NOTHING when nobody is near a transition, so
+//  it barely touches the API. War-time only → effectively $0.
+// ══════════════════════════════════════════════════════════════
+exports.warRapidPoll = onSchedule(
+  {
+    schedule: "every 1 minutes",
+    timeZone: "UTC",
+    retryCount: 0,
+    memory: "256MiB",
+  },
+  async (event) => {
+    const now = Math.floor(Date.now() / 1000);
+    const NEAR = 8 * 60; // seconds before an expiry we start rapid-polling
+
+    // NOTE: reads faction configs each run; fine at current scale. If the
+    // faction count grows large, back this with an active-war index.
+    let factionsSnap;
+    try {
+      factionsSnap = await db.collection("factions").get();
+    } catch (e) {
+      console.error("warRapidPoll: failed to list factions:", e);
+      return;
+    }
+
+    for (const fdoc of factionsSnap.docs) {
+      const factionId = fdoc.id;
+      try {
+        const warCfg = await fdoc.ref.collection("war_tracking").doc("config").get();
+        if (!warCfg.exists || !warCfg.data().active) continue;
+        const opponentFactionId = warCfg.data().opponentFactionId;
+        if (!opponentFactionId) continue;
+
+        const statusDoc = await fdoc.ref.collection("war_tracking").doc("status").get();
+        if (!statusDoc.exists) continue;
+        const opponents = statusDoc.data().opponents || {};
+
+        let hot = false;
+        for (const opp of Object.values(opponents)) {
+          if (opp.travelState === "hospital" && opp.statusUntil) {
+            const rem = opp.statusUntil - now;
+            if (rem <= NEAR && rem > -90) { hot = true; break; }
+          }
+          if (opp.travelState === "returning" && opp.flightEstimates && opp.returnDepartedAt) {
+            const rem = opp.flightEstimates.airstrip - (now - opp.returnDepartedAt);
+            if (rem <= NEAR && rem > -90) { hot = true; break; }
+          }
+        }
+        if (!hot) continue;
+
+        const configDoc = await fdoc.ref.collection("internal").doc("config").get();
+        if (!configDoc.exists) continue;
+        const apiKey = decryptApiKey(configDoc.data().apiKey);
+        await pollOpponents(fdoc.ref, apiKey, opponentFactionId, now);
+        console.log(`warRapidPoll: rapid-polled faction ${factionId} (near-expiry opponent)`);
+      } catch (e) {
+        console.error(`warRapidPoll failed for ${factionId}:`, e);
+      }
     }
   }
 );

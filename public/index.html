@@ -186,7 +186,8 @@
         <div class="wb-controls-right">
           <div class="control-group">
             <label>Sort</label>
-            <select id="wb-sort-select" onchange="wbRenderOpponents()">
+            <select id="wb-sort-select" onchange="wbOnSortChange()">
+              <option value="attackable">Next Attackable</option>
               <option value="status">Status Priority</option>
               <option value="name">Name</option>
               <option value="level">Level</option>
@@ -400,6 +401,7 @@ let hmPatterns={},hmMeta={},hmMemberInfo={},hmViewOffset=0,hmCurrentView='peacet
 let hmPeacetimePatterns={},hmPeacetimeMeta={},hmWartimePatterns={},hmWartimeMeta={};
 let hmOpponentPatterns={},hmOpponentMeta={},hmOpponentFactionName='';
 let wbOpponents={},wbTrackingActive=false,wbOpponentFactionName='',wbLastPoll=0,wbExpectedOppId=null,wbCollecting=false;
+let wbTargeting={},wbUnsubTargeting=null,wbSortTouched=false;
 let wbCountdownInterval=null,wbUnsubStatus=null,wbUnsubEvents=null;
 let wbActiveFilter=null;       // 'okay' | 'returning' | 'traveling_out' | 'abroad' | 'hospital' | null
 let wbImminentOppId=null;      // currently most-imminent returning opponent
@@ -440,6 +442,7 @@ window.createAccountWithEmail=async function(){
 window.signOut=async function(){
   if(wbUnsubStatus){wbUnsubStatus();wbUnsubStatus=null}
   if(wbUnsubEvents){wbUnsubEvents();wbUnsubEvents=null}
+  if(wbUnsubTargeting){wbUnsubTargeting();wbUnsubTargeting=null}
   if(flUnsubBoard){flUnsubBoard();flUnsubBoard=null}
   if(flUnsubItems){flUnsubItems();flUnsubItems=null}
   if(flUnsubFlow){flUnsubFlow();flUnsubFlow=null}
@@ -675,6 +678,37 @@ const STATUS_PRI={returning:0,okay:1,hospital:2,traveling_out:3,abroad:4,jail:5,
 function chipClass(s){return{okay:'chip-okay',returning:'chip-returning',traveling_out:'chip-traveling',abroad:'chip-abroad',hospital:'chip-hospital',jail:'chip-jail'}[s]||'chip-unknown'}
 function statusLabel(s){return{okay:'In Torn',returning:'Returning!',traveling_out:'Flying Out',abroad:'Abroad',hospital:'Hospital',jail:'Jail',in_torn:'In Torn'}[s]||'Unknown'}
 function attackable(s){return s==='okay'||s==='in_torn'}
+// Seconds until this opponent is next hittable in Torn (0 = now, Infinity = far/unknown).
+// Landing adds Torn's 15s arrival grace; hospital/jail use the release timer.
+function wbNextAttackable(o,now){
+  const s=o.travelState;
+  if(s==='okay'||s==='in_torn')return 0;
+  if(s==='hospital'||s==='jail')return o.statusUntil>now?o.statusUntil-now:0;
+  if(s==='returning'&&o.returnDepartedAt){const dest=o.destination||o.lastKnownDestination;const std=lookupFlight(dest);if(std)return Math.max(0,Math.round(std*0.70)-(now-o.returnDepartedAt))+15}
+  return Infinity; // abroad, flying out, unknown
+}
+// Catchability: will they be catchable at their next attackable moment, or bag?
+// Blends accrued discipline (bag vs lapse, dwell, AFK) + live presence + their
+// activity heatmap dead-zone at the expiry hour.
+function wbCatch(id,o,now){
+  const t=wbTargeting[id]||null;
+  let hist=0,thin=true,exposure=0,dwellMin=0,afkRate=0;
+  if(t){const entries=t.okayEntries||0,bags=t.bags||0;thin=(entries+bags)<3;exposure=entries/(entries+bags+1);dwellMin=entries?(t.okayDwellSecTotal/entries)/60:0;afkRate=entries?t.afkOnEntry/entries:0;hist=Math.min(1,exposure*0.5+Math.min(dwellMin/10,1)*0.3+afkRate*0.2)}
+  const la=o.lastActionStatus||'Offline';const live=la==='Offline'?1:la==='Idle'?0.5:0;
+  const secs=wbNextAttackable(o,now);let zone=null;
+  if(secs!==Infinity){const hr=new Date((now+secs)*1000).getUTCHours();const p=hmOpponentPatterns[id]&&hmOpponentPatterns[id].hours&&hmOpponentPatterns[id].hours[hr];if(p&&p.classification&&p.classification!=='no_data')zone=p.classification}
+  const zoneScore=zone==='inactive'?1:zone==='awake'?0.4:0;const zoneKnown=zone!=null;
+  let score;
+  if(thin)score=zoneKnown?live*0.6+zoneScore*0.4:live;
+  else score=zoneKnown?hist*0.4+live*0.35+zoneScore*0.25:hist*0.55+live*0.45;
+  let tier=score>=0.6?'high':score>=0.3?'med':'low';
+  if(!thin&&exposure<0.34&&(t.bags||0)>=2)tier='bagger';
+  return{tier,score,thin,dwellMin,afkRate,exposure,zone,live:la,secs};
+}
+const CATCH_ICON={high:'🎯',med:'◑',low:'○',bagger:'🛡'};
+const CATCH_LABEL={high:'Likely catchable',med:'Maybe',low:'Low odds',bagger:'Usually bags'};
+function wbCatchTip(c){const p=[];if(!c.thin){p.push('Lapses '+Math.round(c.exposure*100)+'% · avg window '+(c.dwellMin>=1?c.dwellMin.toFixed(0)+'m':'<1m')+(c.afkRate>0?' · AFK '+Math.round(c.afkRate*100)+'%':''))}else{p.push('Building history')}p.push('Now: '+c.live);if(c.zone)p.push('Heatmap: '+c.zone+(c.zone==='inactive'?' (dead zone)':''));return p.join(' · ')}
+window.wbOnSortChange=function(){wbSortTouched=true;wbRenderOpponents()};
 
 async function initWarBuddy(){
   if(!userFactionId)return;
@@ -713,11 +747,11 @@ window.wbStartTracking=async function(){
 window.wbStopTracking=async function(){
   if(!firebaseReady||!userFactionId)return;
   await _fb.setDoc(_fb.doc(db,'factions/'+userFactionId+'/war_tracking','config'),{active:false,opponentFactionId:null,stoppedAt:Math.floor(Date.now()/1000)});
-  wbTrackingActive=false;wbCollecting=false;wbExpectedOppId=null;wbOpponents={};wbOpponentFactionName='';wbLastPoll=0;wbUpdateUI();wbSyncBadge(false);wbRenderMeta(null);wbRenderOpponents();wbRenderSummary();
-  if(wbUnsubStatus){wbUnsubStatus();wbUnsubStatus=null}if(wbUnsubEvents){wbUnsubEvents();wbUnsubEvents=null}
+  wbTrackingActive=false;wbCollecting=false;wbExpectedOppId=null;wbOpponents={};wbTargeting={};wbOpponentFactionName='';wbLastPoll=0;wbUpdateUI();wbSyncBadge(false);wbRenderMeta(null);wbRenderOpponents();wbRenderSummary();
+  if(wbUnsubStatus){wbUnsubStatus();wbUnsubStatus=null}if(wbUnsubEvents){wbUnsubEvents();wbUnsubEvents=null}if(wbUnsubTargeting){wbUnsubTargeting();wbUnsubTargeting=null}
 };
 function wbSubscribe(){
-  if(wbUnsubStatus)wbUnsubStatus();if(wbUnsubEvents)wbUnsubEvents();
+  if(wbUnsubStatus)wbUnsubStatus();if(wbUnsubEvents)wbUnsubEvents();if(wbUnsubTargeting)wbUnsubTargeting();
   const base='factions/'+userFactionId+'/war_tracking';
   wbUnsubStatus=_fb.onSnapshot(_fb.doc(db,base,'status'),s=>{if(!s.exists())return;const d=s.data();
     // Ignore a stale status doc still holding the previous opponent — wait for
@@ -725,6 +759,7 @@ function wbSubscribe(){
     if(wbExpectedOppId&&Number(d.opponentFactionId)!==Number(wbExpectedOppId))return;
     wbCollecting=false;wbOpponents=d.opponents||{};wbOpponentFactionName=d.opponentFactionName||'';wbLastPoll=d.lastPoll||0;wbSyncBadge(true);wbRenderMeta(d);wbRenderSummary();wbRenderOpponents()});
   wbUnsubEvents=_fb.onSnapshot(_fb.doc(db,base,'events'),s=>{if(!s.exists())return;wbRenderEvents(s.data().events||[])});
+  wbUnsubTargeting=_fb.onSnapshot(_fb.doc(db,base,'targeting'),s=>{wbTargeting=s.exists()?(s.data().opponents||{}):{};wbRenderOpponents()});
 }
 function wbUpdateUI(){
   document.getElementById('wb-start-btn').style.display=wbTrackingActive?'none':'';
@@ -770,7 +805,9 @@ function wbRenderSummary(){
 window.wbRenderOpponents=function(){
   const list=document.getElementById('wb-opponent-list');const es=Object.entries(wbOpponents);
   if(!es.length){list.innerHTML=wbCollecting?'<div class="state-banner"><h3>Collecting intel…</h3><p>Pulling the opponent\'s current status. This usually takes just a few seconds.</p></div>':wbTrackingActive?'<div class="state-banner"><h3>Waiting for first poll…</h3><p>The Cloud Function runs every 15 minutes.</p></div>':'<div class="state-banner"><h3>No active war tracking</h3><p>Enter an opponent faction ID and click Start Tracking.</p></div>';return}
-  const sm=document.getElementById('wb-sort-select').value;
+  const sel=document.getElementById('wb-sort-select');let sm=sel.value;
+  // Auto-default to "Next Attackable" during a war until the user picks a sort.
+  if(!wbSortTouched&&wbTrackingActive){sm='attackable';if(sel.value!=='attackable')sel.value='attackable'}
   let sorted=es.map(([id,o])=>({id,...o}));
   // Apply filter
   if(wbActiveFilter){
@@ -779,9 +816,11 @@ window.wbRenderOpponents=function(){
       return o.travelState===wbActiveFilter;
     });
   }
-  if(sm==='status')sorted.sort((a,b)=>(STATUS_PRI[a.travelState]??7)-(STATUS_PRI[b.travelState]??7)||a.name.localeCompare(b.name));
+  const now=Math.floor(Date.now()/1000);
+  if(sm==='attackable')sorted.sort((a,b)=>wbNextAttackable(a,now)-wbNextAttackable(b,now)||a.name.localeCompare(b.name));
+  else if(sm==='status')sorted.sort((a,b)=>(STATUS_PRI[a.travelState]??7)-(STATUS_PRI[b.travelState]??7)||a.name.localeCompare(b.name));
   else if(sm==='name')sorted.sort((a,b)=>a.name.localeCompare(b.name));else sorted.sort((a,b)=>b.level-a.level);
-  const now=Math.floor(Date.now()/1000);list.innerHTML='';
+  list.innerHTML='';
   if(!sorted.length){list.innerHTML='<div class="state-banner"><h3>No opponents match this filter</h3><p>Tap the chip again to clear.</p></div>';return}
   sorted.forEach(opp=>{
     const row=document.createElement('div');
@@ -790,6 +829,8 @@ window.wbRenderOpponents=function(){
     const pc=document.createElement('div');pc.className='opp-person-cell';pc.innerHTML=`<span class="person-name"><a href="https://www.torn.com/profiles.php?XID=${opp.id}" target="_blank">${opp.name}</a></span><span class="person-meta">Lvl ${opp.level}${opp.position?' · '+opp.position:''}</span>`;
     const sc=document.createElement('div');sc.className='status-cell';const atk=attackable(opp.travelState);
     sc.innerHTML=`<div class="status-chip ${chipClass(opp.travelState)}"><span class="dot"></span>${statusLabel(opp.travelState)}</div>${atk?`<a href="https://www.torn.com/loader.php?sid=attack&user2ID=${opp.id}" target="_blank" class="attack-btn-inline attackable">⚔ Attack</a>`:''}`;
+    const _secs=wbNextAttackable(opp,now);
+    if(_secs>0&&_secs!==Infinity){const _c=wbCatch(opp.id,opp,now);sc.innerHTML+=`<div class="wb-catch ${_c.tier}" title="${wbCatchTip(_c).replace(/"/g,'&quot;')}">${CATCH_ICON[_c.tier]} ${CATCH_LABEL[_c.tier]}</div>`}
     const tc=document.createElement('div');tc.className='travel-cell';
     if(opp.travelState==='returning'||opp.travelState==='traveling_out'){
       const dest=opp.destination||opp.lastKnownDestination||'Unknown';const dep=opp.travelState==='returning'?opp.returnDepartedAt:opp.departedAt;const std=lookupFlight(dest);
@@ -814,22 +855,19 @@ function wbRenderEvents(events){
   body.innerHTML=sorted.slice(0,50).map(ev=>`<div class="event-entry"><span class="event-time">${formatTime(ev.timestamp)}</span><span class="event-text"><span class="event-name">${ev.name}</span> ${labels[ev.to]||ev.to}${ev.destination?' ('+ev.destination+')':''}</span></div>`).join('');
 }
 
-// ─── Imminent landing tracker ───
-// Find the most-imminent returning opponent (≤120s on airstrip path)
-// and show the sticky bar pointing to them.
-const IMMINENT_THRESHOLD = 120;  // seconds — show bar within 2 minutes of airstrip landing
+// ─── Imminent-attackable tracker ───
+// Find the opponent about to become hittable soonest (hospital release OR
+// landing, ≤120s out) and show the sticky "get ready" bar with a catch hint.
+const IMMINENT_THRESHOLD = 120;  // seconds — show bar within 2 minutes of attackable
 function updateImminent(){
   const bar=document.getElementById('wb-imminent-bar');
   if(!bar)return;
   const now=Math.floor(Date.now()/1000);
   let best=null,bestRem=Infinity;
   for(const[id,opp]of Object.entries(wbOpponents)){
-    if(opp.travelState!=='returning'||!opp.returnDepartedAt)continue;
-    const dest=opp.destination||opp.lastKnownDestination;
-    const std=lookupFlight(dest);if(!std)continue;
-    const airstripTime=Math.round(std*0.70);
-    const rem=airstripTime-(now-opp.returnDepartedAt);
-    if(rem<=IMMINENT_THRESHOLD&&rem>-30&&rem<bestRem){bestRem=rem;best={id,opp,rem}}
+    const rem=wbNextAttackable(opp,now);
+    if(rem===Infinity||rem<=0)continue; // 0 = already attackable (in the list to hit now)
+    if(rem<=IMMINENT_THRESHOLD&&rem<bestRem){bestRem=rem;best={id,opp,rem}}
   }
   // Mark imminent row
   document.querySelectorAll('.opponent-row.imminent').forEach(r=>{
@@ -839,8 +877,13 @@ function updateImminent(){
     wbImminentOppId=best.id;
     const row=document.querySelector('.opponent-row[data-opp-id="'+best.id+'"]');
     if(row)row.classList.add('imminent');
+    const c=wbCatch(best.id,best.opp,now);
+    let hint='';
+    if(c.tier==='high')hint=' · likely catchable'+(c.live==='Offline'?' (AFK)':c.zone==='inactive'?' (dead zone)':'');
+    else if(c.tier==='bagger')hint=' · usually bags';
+    else if(c.live==='Offline')hint=' · AFK now';
     document.getElementById('wb-imminent-text').textContent=
-      best.opp.name+' landing in '+formatCountdown(Math.max(0,best.rem));
+      best.opp.name+' attackable in '+formatCountdown(Math.max(0,best.rem))+hint;
     bar.classList.add('visible');
   }else{
     wbImminentOppId=null;

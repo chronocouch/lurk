@@ -615,6 +615,16 @@ input[type="text"] { width:140px; }
 .opp-person-cell .person-name { font-size:14px; }
 
 .status-cell { padding:12px 14px; border-right:1px solid var(--border); }
+/* Catchability badge (bag discipline × live presence × heatmap dead-zone) */
+.wb-catch {
+  display:inline-flex; align-items:center; gap:4px; margin-top:5px;
+  font-size:10px; font-weight:600; padding:2px 7px; border-radius:10px; white-space:nowrap;
+  border:1px solid var(--border); background:var(--surface2); color:var(--text-dim);
+}
+.wb-catch.high { color:var(--active); border-color:rgba(52,211,153,0.4); background:var(--active-bg); }
+.wb-catch.med { color:var(--awake); border-color:rgba(251,191,36,0.3); }
+.wb-catch.low { color:var(--text-muted); }
+.wb-catch.bagger { color:var(--hospital); border-color:rgba(96,165,250,0.3); }
 .status-chip {
   display:inline-flex; align-items:center; gap:6px;
   font-size:12px; font-weight:500; padding:5px 10px;

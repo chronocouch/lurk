@@ -45,6 +45,8 @@ Multi-tenant Firebase web app providing activity intelligence for Torn City fact
 | `collectActivity` | scheduled (15 min) | Iterates all active factions, polls Torn API, writes snapshots, also polls opponents during war |
 | `aggregatePatterns` | scheduled (hourly) | Builds peacetime/wartime heatmap data per faction |
 | `watchReturning` | Firestore trigger | Rapid-polls opponents near landing for accurate landing detection |
+| `onWarConfigChange` | Firestore trigger | On war_tracking/config start/switch, immediately polls the new opponent (writes status only, no loop) so War Buddy shows fresh intel in seconds |
+| `warRapidPoll` | scheduled (1 min) | During an active war, rapid-polls the opponent faction when anyone is within ~8 min of a hospital release / landing — banks bag-vs-lapse + presence for the catchability profile. Does nothing when nobody's near a transition |
 | `cleanupStaleUsers` | scheduled (weekly) | Removes stale user records |
 | `collectTravelMarket` | scheduled (15 min) | Flights planner: YATA foreign stock/cost + `torn/items` market value + per-favorite bazaar/item-market sell prices → shared `travel_market/board`+`items` |
 | `collectStock` | scheduled (5 min) | Flights planner: YATA-only stock poll (no key), finer depletion/restock for the fly window → shared `travel_market/flow` |
@@ -62,6 +64,7 @@ factions/{factionId}/war_tracking/config             → war buddy config
 factions/{factionId}/war_tracking/status             → current war state
 factions/{factionId}/war_tracking/events             → war events
 factions/{factionId}/war_tracking/opponent_activity_*  → tracked opponent data
+factions/{factionId}/war_tracking/targeting          → per-opponent bag-discipline stats (bags, okayEntries, dwell, afkOnEntry) → catchability score
 factions/{factionId}/flight_planner/config           → Flights: watchlist favorites + planner settings (owner-writable)
 
 travel_market/board                                  → GLOBAL: all foreign items (cost, stock, market-value sell, 24h margin trend, stats)
@@ -102,6 +105,7 @@ travel_market/history                                → GLOBAL: rolling per-ite
 - Heatmap UI: peacetime, wartime, opponent views
 - War Buddy: opponent travel tracker, flight estimates, imminent alerts, filter chips
 - War Intel: differential coverage bar + auto-detected vulnerability/opportunity windows (<2 online flagged, 0 = critical) with member lists
+- Target readiness: "Next attackable" sort (auto-default during war) surfaces opponents about to land / leave hospital; per-opponent catchability badge (bag-discipline history × live presence × heatmap dead-zone) predicts whether they'll bag or be catchable; sticky "attackable in Xs" alert for the soonest catchable target
 - Flights planner: discovery board of all foreign items ranked by expected $/min, favorites (pinned + precise pricing), fly window (depletion vs. flight time), copyable bazaar list-price recommendation, ✈ links to Torn's travel agency. Backed by YATA + `torn/items`; reliability/window sharpen over ~1–2 weeks of history.
 - Firestore rules
 - In active use by my faction "The North Stand" during ranked wars
