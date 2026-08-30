@@ -1514,6 +1514,110 @@ exports.collectStock = onSchedule(
 //  the Mug tab renders. Only runs for factions with an active watchlist.
 //  Carried cash is hidden by Torn, so this is a proxy/EV signal set.
 // ══════════════════════════════════════════════════════════════
+// Poll one faction's mug watchlist: manual targets + idle-attackable
+// members of its scan factions (accumulated, freshest first, capped).
+async function pollMugFaction(fdoc, now) {
+  const plan = await fdoc.ref.collection("mug_watchlist").doc("config").get();
+  if (!plan.exists || plan.data().active === false) return;
+  const targets = (plan.data().targets || []).map(String).filter(Boolean);
+  let scanFactions = Array.isArray(plan.data().scanFactions) ? plan.data().scanFactions.map(String) : [];
+  if (plan.data().scanFaction && scanFactions.length === 0) scanFactions = [String(plan.data().scanFaction)]; // legacy
+  scanFactions = [...new Set(scanFactions.filter(Boolean))];
+  if (targets.length === 0 && scanFactions.length === 0) return;
+
+  const cfg = await fdoc.ref.collection("internal").doc("config").get();
+  if (!cfg.exists || !cfg.data().active) return;
+  const apiKey = decryptApiKey(cfg.data().apiKey);
+  const scouterKey = cfg.data().scouterKey ? decryptApiKey(cfg.data().scouterKey) : null;
+
+  const idList = [...new Set(targets)];
+  const scannedSet = new Set();
+  const scanFactionNames = [];
+  // Gather idle-attackable candidates across ALL scan factions (basic call
+  // gives status + last_action cheaply), then deep-poll the freshest.
+  const cands = [];
+  for (const fid of scanFactions) {
+    try {
+      const fr = await fetch(`https://api.torn.com/faction/${fid}?selections=basic&key=${apiKey}`);
+      const fd = await fr.json();
+      if (!fd.error && fd.members) {
+        scanFactionNames.push(fd.name || fid);
+        for (const [id, m] of Object.entries(fd.members)) {
+          if ((m.status && m.status.state) === "Okay" && (m.last_action && m.last_action.status) !== "Online") {
+            cands.push({ id: String(id), ts: (m.last_action && m.last_action.timestamp) || 0 });
+          }
+        }
+      } else if (fd.error) {
+        console.error(`mug: scan faction ${fid} error:`, fd.error);
+      }
+    } catch (e) { console.error(`mug: scan faction ${fid} fetch failed:`, e); }
+  }
+  cands.sort((a, b) => b.ts - a.ts); // freshest idle first
+  const cap = Math.max(0, 40 - idList.length);
+  for (const c of cands.slice(0, cap)) {
+    if (!idList.includes(c.id)) { idList.push(c.id); scannedSet.add(c.id); }
+  }
+  if (idList.length === 0) return;
+
+  const out = {};
+  for (const id of idList) {
+    const scanned = scannedSet.has(id);
+    try {
+      const res = await fetch(`https://api.torn.com/user/${id}?selections=profile,personalstats&key=${apiKey}`);
+      const d = await res.json();
+      if (d.error) { out[id] = { id, name: id, error: d.error.error || "error", scanned }; continue; }
+      const st = d.status || {};
+      const ps = d.personalstats || {};
+      const la = d.last_action || {};
+      out[id] = {
+        id,
+        name: d.name || id,
+        level: d.level || 0,
+        state: st.state || "Unknown",
+        statusUntil: st.until || 0,
+        lastActionTs: la.timestamp || 0,
+        lastActionStatus: la.status || "Offline",
+        job: d.job && d.job.company_name && d.job.company_name !== "None"
+          ? `${d.job.position} @ ${d.job.company_name}` : null,
+        networth: ps.networth || 0,
+        largestMug: ps.largestmug || 0,
+        moneyMugged: ps.moneymugged || 0,
+        scanned,
+      };
+    } catch (e) {
+      out[id] = { id, name: id, error: "fetch failed", scanned };
+    }
+  }
+
+  if (scouterKey) {
+    const ids = Object.keys(out).filter((id) => !out[id].error);
+    for (let i = 0; i < ids.length; i += 200) {
+      const batch = ids.slice(i, i + 200);
+      try {
+        const r = await fetch(`https://ffscouter.com/api/v1/get-stats?key=${scouterKey}&targets=${batch.join(",")}`);
+        const arr = await r.json();
+        if (Array.isArray(arr)) {
+          for (const p of arr) {
+            const o = out[String(p.player_id)];
+            if (!o) continue;
+            o.bsEstimate = p.bs_estimate != null ? p.bs_estimate : null;
+            o.bsHuman = p.bs_estimate_human || null;
+            o.fairFight = p.fair_fight != null ? p.fair_fight : null;
+          }
+        }
+      } catch (e) { console.error("mug: FFScouter fetch failed:", e); }
+    }
+  }
+
+  await fdoc.ref.collection("mug_watchlist").doc("status").set({
+    targets: out,
+    scouterEnabled: !!scouterKey,
+    scanFactionNames,
+    lastPoll: now,
+  });
+  console.log(`mug: polled ${Object.keys(out).length} (scans:${scanFactionNames.join(",") || "none"}) faction ${fdoc.id}`);
+}
+
 exports.collectMugTargets = onSchedule(
   {
     schedule: "every 5 minutes",
@@ -1523,7 +1627,6 @@ exports.collectMugTargets = onSchedule(
   },
   async (event) => {
     const now = Math.floor(Date.now() / 1000);
-
     let factionsSnap;
     try {
       factionsSnap = await db.collection("factions").get();
@@ -1531,113 +1634,25 @@ exports.collectMugTargets = onSchedule(
       console.error("mug: failed to list factions:", e);
       return;
     }
-
     for (const fdoc of factionsSnap.docs) {
-      try {
-        const plan = await fdoc.ref.collection("mug_watchlist").doc("config").get();
-        if (!plan.exists || plan.data().active === false) continue;
-        const targets = (plan.data().targets || []).map(String).filter(Boolean);
-        const scanFaction = plan.data().scanFaction ? String(plan.data().scanFaction) : null;
-        if (targets.length === 0 && !scanFaction) continue;
-
-        const cfg = await fdoc.ref.collection("internal").doc("config").get();
-        if (!cfg.exists || !cfg.data().active) continue;
-        const apiKey = decryptApiKey(cfg.data().apiKey);
-        const scouterKey = cfg.data().scouterKey ? decryptApiKey(cfg.data().scouterKey) : null;
-
-        // Build the ID list: manual targets + idle-attackable members of the
-        // scan faction (basic call gives status + last_action, so we filter
-        // cheaply and only deep-poll the promising subset).
-        const idList = [...new Set(targets)];
-        const scannedSet = new Set();
-        let scanFactionName = null;
-        if (scanFaction) {
-          try {
-            const fr = await fetch(`https://api.torn.com/faction/${scanFaction}?selections=basic&key=${apiKey}`);
-            const fd = await fr.json();
-            if (!fd.error && fd.members) {
-              scanFactionName = fd.name || scanFaction;
-              const cands = Object.entries(fd.members)
-                .filter(([, m]) => (m.status && m.status.state) === "Okay" &&
-                  (m.last_action && m.last_action.status) !== "Online")
-                .sort((a, b) => (b[1].last_action?.timestamp || 0) - (a[1].last_action?.timestamp || 0));
-              const cap = Math.max(0, 40 - idList.length);
-              for (const [id] of cands.slice(0, Math.min(25, cap))) {
-                if (!idList.includes(String(id))) { idList.push(String(id)); scannedSet.add(String(id)); }
-              }
-            } else if (fd.error) {
-              console.error(`mug: scan faction ${scanFaction} error:`, fd.error);
-            }
-          } catch (e) { console.error("mug: scan faction fetch failed:", e); }
-        }
-        if (idList.length === 0) continue;
-
-        const out = {};
-        for (const id of idList) {
-          const scanned = scannedSet.has(id);
-          try {
-            const res = await fetch(
-              `https://api.torn.com/user/${id}?selections=profile,personalstats&key=${apiKey}`
-            );
-            const d = await res.json();
-            if (d.error) { out[id] = { id, name: id, error: d.error.error || "error", scanned }; continue; }
-            const st = d.status || {};
-            const ps = d.personalstats || {};
-            const la = d.last_action || {};
-            out[id] = {
-              id,
-              name: d.name || id,
-              level: d.level || 0,
-              state: st.state || "Unknown",
-              statusUntil: st.until || 0,
-              lastActionTs: la.timestamp || 0,
-              lastActionStatus: la.status || "Offline",
-              job: d.job && d.job.company_name && d.job.company_name !== "None"
-                ? `${d.job.position} @ ${d.job.company_name}` : null,
-              networth: ps.networth || 0,
-              largestMug: ps.largestmug || 0,
-              moneyMugged: ps.moneymugged || 0,
-              scanned,
-            };
-          } catch (e) {
-            out[id] = { id, name: id, error: "fetch failed", scanned };
-          }
-        }
-
-        // FFScouter: beatability + stealth proxy (batched)
-        if (scouterKey) {
-          const ids = Object.keys(out).filter((id) => !out[id].error);
-          for (let i = 0; i < ids.length; i += 200) {
-            const batch = ids.slice(i, i + 200);
-            try {
-              const r = await fetch(
-                `https://ffscouter.com/api/v1/get-stats?key=${scouterKey}&targets=${batch.join(",")}`
-              );
-              const arr = await r.json();
-              if (Array.isArray(arr)) {
-                for (const p of arr) {
-                  const o = out[String(p.player_id)];
-                  if (!o) continue;
-                  o.bsEstimate = p.bs_estimate != null ? p.bs_estimate : null;
-                  o.bsHuman = p.bs_estimate_human || null;
-                  o.fairFight = p.fair_fight != null ? p.fair_fight : null;
-                }
-              }
-            } catch (e) { console.error("mug: FFScouter fetch failed:", e); }
-          }
-        }
-
-        await fdoc.ref.collection("mug_watchlist").doc("status").set({
-          targets: out,
-          scouterEnabled: !!scouterKey,
-          scanFactionName: scanFactionName || null,
-          lastPoll: now,
-        });
-        console.log(`mug: polled ${Object.keys(out).length} targets (scan:${scanFactionName || "none"}) for faction ${fdoc.id}`);
-      } catch (e) {
-        console.error(`mug: faction ${fdoc.id} failed:`, e);
-      }
+      try { await pollMugFaction(fdoc, now); }
+      catch (e) { console.error(`mug: faction ${fdoc.id} failed:`, e); }
     }
+  }
+);
+
+// Immediate poll when the mug watchlist config changes (add/remove/scan),
+// so targets populate in seconds instead of waiting for the 5-min schedule.
+exports.onMugConfigChange = onDocumentWritten(
+  { document: "factions/{factionId}/mug_watchlist/config", memory: "256MiB" },
+  async (event) => {
+    const after = event.data?.after?.data();
+    if (!after || after.active === false) return;
+    const factionId = event.params.factionId;
+    const fdoc = await db.collection("factions").doc(factionId).get();
+    if (!fdoc.exists) return;
+    try { await pollMugFaction(fdoc, Math.floor(Date.now() / 1000)); }
+    catch (e) { console.error(`mug: immediate poll failed for ${factionId}:`, e); }
   }
 );
 

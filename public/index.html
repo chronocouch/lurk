@@ -583,7 +583,7 @@ let flBoard={},flBoardMeta={},flItems={},flFlow={},flUnsubBoard=null,flUnsubItem
 const FL_TIMES={"Mexico":1560,"Canada":2220,"Cayman Islands":3420,"Hawaii":7260,"United Kingdom":9120,"Switzerland":10140,"Argentina":11340,"Japan":12180,"China":13140,"UAE":15540,"South Africa":18660};
 const FL_METHOD_MULT={standard:1,airstrip:0.70,wlt:0.50};
 // ─── Mug watchlist state ───
-let mugTargets=[],mugStatus={},mugScouterEnabled=false,mugLastPoll=0,mugUnsubConfig=null,mugUnsubStatus=null,mugAlertId=null,mugScanFaction=null,mugScanFactionName='';
+let mugTargets=[],mugStatus={},mugScouterEnabled=false,mugLastPoll=0,mugUnsubConfig=null,mugUnsubStatus=null,mugAlertId=null,mugScanFactions=[],mugScanFactionNames=[];
 
 function showScreen(id){
   ['screen-loading','screen-landing','screen-verify','screen-onboarding','screen-app'].forEach(s=>{
@@ -1218,13 +1218,13 @@ const MUG_RANK={prime:0,soft:1,active:2,toostrong:3,unavailable:4,stale:5,error:
 function initMug(){
   if(!firebaseReady||!userFactionId)return;
   if(mugUnsubConfig)mugUnsubConfig();if(mugUnsubStatus)mugUnsubStatus();
-  mugUnsubConfig=_fb.onSnapshot(_fb.doc(db,'factions/'+userFactionId+'/mug_watchlist','config'),s=>{const d=s.exists()?s.data():{};mugTargets=Array.isArray(d.targets)?d.targets:[];mugScanFaction=d.scanFaction?String(d.scanFaction):null;mugRender()});
-  mugUnsubStatus=_fb.onSnapshot(_fb.doc(db,'factions/'+userFactionId+'/mug_watchlist','status'),s=>{if(s.exists()){const d=s.data();mugStatus=d.targets||{};mugScouterEnabled=!!d.scouterEnabled;mugScanFactionName=d.scanFactionName||'';mugLastPoll=d.lastPoll||0}mugRender()});
+  mugUnsubConfig=_fb.onSnapshot(_fb.doc(db,'factions/'+userFactionId+'/mug_watchlist','config'),s=>{const d=s.exists()?s.data():{};mugTargets=Array.isArray(d.targets)?d.targets:[];mugScanFactions=Array.isArray(d.scanFactions)?d.scanFactions.map(String):(d.scanFaction?[String(d.scanFaction)]:[]);mugRender()});
+  mugUnsubStatus=_fb.onSnapshot(_fb.doc(db,'factions/'+userFactionId+'/mug_watchlist','status'),s=>{if(s.exists()){const d=s.data();mugStatus=d.targets||{};mugScouterEnabled=!!d.scouterEnabled;mugScanFactionNames=Array.isArray(d.scanFactionNames)?d.scanFactionNames:(d.scanFactionName?[d.scanFactionName]:[]);mugLastPoll=d.lastPoll||0}mugRender()});
   if(!window._mugTicker)window._mugTicker=setInterval(()=>{if(document.getElementById('tab-mug')&&document.getElementById('tab-mug').classList.contains('active'))mugRender()},20000);
 }
 async function mugPersist(){
   if(!firebaseReady||!userFactionId)return;
-  try{await _fb.setDoc(_fb.doc(db,'factions/'+userFactionId+'/mug_watchlist','config'),{targets:mugTargets,scanFaction:mugScanFaction?parseInt(mugScanFaction):null,active:true,updatedAt:Math.floor(Date.now()/1000)})}
+  try{await _fb.setDoc(_fb.doc(db,'factions/'+userFactionId+'/mug_watchlist','config'),{targets:mugTargets,scanFactions:mugScanFactions.map(Number),scanFaction:_fb.deleteField(),active:true,updatedAt:Math.floor(Date.now()/1000)})}
   catch(e){console.error('mug config save failed',e)}
 }
 window.mugAdd=function(){
@@ -1238,11 +1238,12 @@ window.mugRemove=function(id){mugTargets=mugTargets.filter(t=>String(t)!==String
 window.mugWatch=function(id){id=String(id);if(!mugTargets.map(String).includes(id)){mugTargets.push(parseInt(id));mugRender();mugPersist()}};
 window.mugSetScan=function(){
   const inp=document.getElementById('mug-scan-input');const raw=(inp.value||'').trim();
-  let id=null;const m=raw.match(/factions\.php\?step=profile&ID=(\d+)|ID=(\d+)/i);if(m)id=m[1]||m[2];else if(/^\d+$/.test(raw))id=raw;
+  let id=null;const m=raw.match(/ID=(\d+)/i);if(m)id=m[1];else if(/^\d+$/.test(raw))id=raw;
   if(!id){alert('Enter a numeric faction ID.');return}
-  mugScanFaction=String(id);inp.value='';mugRender();mugPersist();
+  if(!mugScanFactions.map(String).includes(String(id)))mugScanFactions.push(parseInt(id));
+  inp.value='';mugRender();mugPersist();
 };
-window.mugClearScan=function(){mugScanFaction=null;mugScanFactionName='';mugRender();mugPersist()};
+window.mugClearScan=function(id){mugScanFactions=mugScanFactions.filter(f=>String(f)!==String(id));mugRender();mugPersist()};
 window.mugScrollToAlert=function(){if(!mugAlertId)return;const r=document.querySelector('.mug-row[data-mug-id="'+mugAlertId+'"]');if(r)r.scrollIntoView({behavior:'smooth',block:'center'})};
 
 function mugReadiness(t,now){
@@ -1313,18 +1314,21 @@ function mugRowHtml(t,r,now){
 function mugRender(){
   const list=document.getElementById('mug-list');if(!list)return;
   const now=Math.floor(Date.now()/1000);
-  // Scan-faction indicator
+  // Scan-faction chips
   const scanEl=document.getElementById('mug-scan-active');
-  if(mugScanFaction){scanEl.style.display='';scanEl.innerHTML=`Scanning <span class="meta-value">${mugScanFactionName||('faction '+mugScanFaction)}</span> for idle, attackable members <button class="mug-remove" onclick="mugClearScan()" title="Stop scanning">✕</button>`}
-  else scanEl.style.display='none';
+  if(mugScanFactions.length){
+    scanEl.style.display='';
+    const chips=mugScanFactions.map((f,i)=>`<span class="mug-scan-chip">${mugScanFactionNames[i]||('faction '+f)}<button onclick="mugClearScan('${f}')" title="Stop scanning this faction">✕</button></span>`).join('');
+    scanEl.innerHTML=`<span class="mug-scan-lbl">Scanning for idle, attackable members:</span>${chips}`;
+  } else scanEl.style.display='none';
   // Union of manual targets + scanned candidates (from status)
   const ids=new Set(mugTargets.map(String));
   Object.keys(mugStatus).forEach(id=>ids.add(String(id)));
   const nManual=mugTargets.length;
   document.getElementById('mug-meta-bar').innerHTML=ids.size?`<div class="meta-item">Targets <span class="meta-value">${nManual} watched${ids.size>nManual?' · '+(ids.size-nManual)+' scanned':''}</span></div><div class="meta-item">Updated <span class="meta-value">${mugLastPoll?timeAgo(mugLastPoll):'—'}</span></div>`:'';
   if(!ids.size){
-    list.innerHTML=mugScanFaction
-      ?'<div class="state-banner"><h3>Scanning…</h3><p>Pulling idle, attackable members. First results within ~5 min.</p></div>'
+    list.innerHTML=mugScanFactions.length
+      ?'<div class="state-banner"><h3>Scanning…</h3><p>Pulling idle, attackable members. Results appear within a few seconds.</p></div>'
       :'<div class="state-banner"><h3>No targets yet</h3><p>Add player IDs of known cash-carriers, or scan a faction for soft members.</p></div>';
     document.getElementById('mug-alert-bar').classList.remove('visible');document.getElementById('mug-disclaimer').textContent='';return;
   }
