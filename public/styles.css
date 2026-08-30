@@ -1460,3 +1460,44 @@ input[type="text"] { width:140px; }
   .home-grid, .home-support-grid { grid-template-columns:1fr; }
   .home-card, .home-support-card { padding:16px; }
 }
+
+/* ═══════════════════════════════════════════════════════════
+   MUG WATCHLIST
+   ═══════════════════════════════════════════════════════════ */
+.mug-list { display:flex; flex-direction:column; gap:8px; }
+.mug-row {
+  display:grid; grid-template-columns:minmax(150px,1.3fr) minmax(0,1.7fr) minmax(120px,auto) auto;
+  align-items:center; gap:14px; padding:12px 14px;
+  background:var(--surface); border:1px solid var(--border);
+  border-left:3px solid var(--border-light); border-radius:10px;
+}
+.mug-row.ready-prime { border-left-color:var(--active); }
+.mug-row.ready-soft { border-left-color:var(--awake); }
+.mug-row.ready-active { border-left-color:var(--accent); }
+.mug-row.ready-toostrong { border-left-color:var(--danger); }
+.mug-row.ready-unavailable, .mug-row.ready-stale, .mug-row.ready-pending, .mug-row.ready-error { border-left-color:var(--text-muted); }
+.mug-id { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.mug-id a { font-size:14px; font-weight:600; color:var(--text); text-decoration:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.mug-id a:hover { color:var(--accent); }
+.mug-meta { font-size:11px; color:var(--text-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.mug-badges { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+.mug-money { font-size:11px; font-weight:600; color:var(--awake); white-space:nowrap; }
+.mug-net { color:var(--text-dim); font-weight:400; }
+.mug-ready { display:flex; flex-direction:column; gap:2px; align-items:flex-start; }
+.mug-ready-badge { font-size:11px; font-weight:600; white-space:nowrap; }
+.mug-sub { font-size:10px; color:var(--text-dim); }
+.ready-prime .mug-ready-badge { color:var(--active); }
+.ready-soft .mug-ready-badge { color:var(--awake); }
+.ready-active .mug-ready-badge { color:var(--accent); }
+.ready-toostrong .mug-ready-badge { color:var(--danger); }
+.ready-unavailable .mug-ready-badge, .ready-stale .mug-ready-badge, .ready-pending .mug-ready-badge, .ready-error .mug-ready-badge { color:var(--text-muted); }
+.mug-actions { display:flex; align-items:center; gap:8px; justify-self:end; }
+.mug-remove { border:none; background:transparent; color:var(--text-muted); cursor:pointer; font-size:13px; padding:4px 6px; border-radius:6px; line-height:1; }
+.mug-remove:hover { color:var(--danger); background:var(--danger-bg); }
+.mug-actions .attack-btn { display:inline-flex; align-items:center; padding:7px 12px; border-radius:8px; font-size:12px; font-weight:600; text-decoration:none; border:1px solid rgba(248,113,113,0.3); background:rgba(248,113,113,0.15); color:var(--danger); white-space:nowrap; }
+.mug-actions .attack-btn:hover { background:rgba(248,113,113,0.25); border-color:var(--danger); }
+
+@media (max-width:640px) {
+  .mug-row { grid-template-columns:1fr; gap:9px; }
+  .mug-actions { justify-self:stretch; justify-content:space-between; }
+}

@@ -1507,6 +1507,111 @@ exports.collectStock = onSchedule(
 
 
 // ══════════════════════════════════════════════════════════════
+//  MUG WATCHLIST COLLECTOR — runs every 5 minutes
+//  Polls each watched player's profile + personalstats (last_action,
+//  networth, largestmug — the "proven cash-carrier" signal) and their
+//  FFScouter estimate (beatability + stealth proxy). Writes a status doc
+//  the Mug tab renders. Only runs for factions with an active watchlist.
+//  Carried cash is hidden by Torn, so this is a proxy/EV signal set.
+// ══════════════════════════════════════════════════════════════
+exports.collectMugTargets = onSchedule(
+  {
+    schedule: "every 5 minutes",
+    timeZone: "UTC",
+    retryCount: 0,
+    memory: "256MiB",
+  },
+  async (event) => {
+    const now = Math.floor(Date.now() / 1000);
+
+    let factionsSnap;
+    try {
+      factionsSnap = await db.collection("factions").get();
+    } catch (e) {
+      console.error("mug: failed to list factions:", e);
+      return;
+    }
+
+    for (const fdoc of factionsSnap.docs) {
+      try {
+        const plan = await fdoc.ref.collection("mug_watchlist").doc("config").get();
+        if (!plan.exists || plan.data().active === false) continue;
+        const targets = (plan.data().targets || []).map(String).filter(Boolean);
+        if (targets.length === 0) continue;
+
+        const cfg = await fdoc.ref.collection("internal").doc("config").get();
+        if (!cfg.exists || !cfg.data().active) continue;
+        const apiKey = decryptApiKey(cfg.data().apiKey);
+        const scouterKey = cfg.data().scouterKey ? decryptApiKey(cfg.data().scouterKey) : null;
+
+        const out = {};
+        for (const id of targets) {
+          try {
+            const res = await fetch(
+              `https://api.torn.com/user/${id}?selections=profile,personalstats&key=${apiKey}`
+            );
+            const d = await res.json();
+            if (d.error) { out[id] = { id, name: id, error: d.error.error || "error" }; continue; }
+            const st = d.status || {};
+            const ps = d.personalstats || {};
+            const la = d.last_action || {};
+            out[id] = {
+              id,
+              name: d.name || id,
+              level: d.level || 0,
+              state: st.state || "Unknown",
+              statusUntil: st.until || 0,
+              lastActionTs: la.timestamp || 0,
+              lastActionStatus: la.status || "Offline",
+              job: d.job && d.job.company_name && d.job.company_name !== "None"
+                ? `${d.job.position} @ ${d.job.company_name}` : null,
+              networth: ps.networth || 0,
+              largestMug: ps.largestmug || 0,
+              moneyMugged: ps.moneymugged || 0,
+            };
+          } catch (e) {
+            out[id] = { id, name: id, error: "fetch failed" };
+          }
+        }
+
+        // FFScouter: beatability + stealth proxy (batched)
+        if (scouterKey) {
+          const ids = Object.keys(out).filter((id) => !out[id].error);
+          for (let i = 0; i < ids.length; i += 200) {
+            const batch = ids.slice(i, i + 200);
+            try {
+              const r = await fetch(
+                `https://ffscouter.com/api/v1/get-stats?key=${scouterKey}&targets=${batch.join(",")}`
+              );
+              const arr = await r.json();
+              if (Array.isArray(arr)) {
+                for (const p of arr) {
+                  const o = out[String(p.player_id)];
+                  if (!o) continue;
+                  o.bsEstimate = p.bs_estimate != null ? p.bs_estimate : null;
+                  o.bsHuman = p.bs_estimate_human || null;
+                  o.fairFight = p.fair_fight != null ? p.fair_fight : null;
+                }
+              }
+            } catch (e) { console.error("mug: FFScouter fetch failed:", e); }
+          }
+        }
+
+        await fdoc.ref.collection("mug_watchlist").doc("status").set({
+          targets: out,
+          scouterEnabled: !!scouterKey,
+          lastPoll: now,
+        });
+        console.log(`mug: polled ${targets.length} targets for faction ${fdoc.id}`);
+      } catch (e) {
+        console.error(`mug: faction ${fdoc.id} failed:`, e);
+      }
+    }
+  }
+);
+
+
+// ══════════════════════════════════════════════════════════════
 //  CLEANUP — runs weekly
 //  Deletes user docs that have been factionless for 30+ days.
 //  This is hygiene only — Firestore rules already block their access

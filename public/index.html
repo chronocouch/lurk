@@ -145,6 +145,9 @@
         <button class="nav-tab" data-tab="flights" onclick="switchTab('flights')">
           <span class="tab-icon">✈</span> <span class="tab-label">Flights</span>
         </button>
+        <button class="nav-tab" data-tab="mug" onclick="switchTab('mug')">
+          <span class="tab-icon">💰</span> <span class="tab-label">Mug</span>
+        </button>
         <button class="nav-tab" data-tab="settings" onclick="switchTab('settings')">
           <span class="tab-icon">⚙</span> <span class="tab-label">Settings</span>
         </button>
@@ -431,6 +434,42 @@
       <p class="fl-disclaimer" id="fl-disclaimer"></p>
     </div>
 
+    <!-- ─── Mug watchlist tab ─── -->
+    <div class="content-frame" id="tab-mug">
+      <div class="fl-header">
+        <h2>Mug Watchlist</h2>
+        <p class="fl-subtitle">Torn hides carried cash, so these are proxy signals: proven cash-carriers (biggest mug taken off them), whether they're beatable/stealthable (FF), and whether they've gone idle while attackable. An edge, not a guarantee.</p>
+      </div>
+
+      <div class="hm-meta-bar" id="mug-meta-bar"></div>
+
+      <div class="fl-board-controls">
+        <input type="text" id="mug-add-input" class="fl-search" placeholder="Add player ID or profile URL…" autocomplete="off" onkeydown="if(event.key==='Enter')mugAdd()">
+        <button class="btn btn-secondary" onclick="mugAdd()">Add target</button>
+        <div class="control-group fl-sort-group">
+          <label>Sort</label>
+          <select id="mug-sort" onchange="mugRender()">
+            <option value="ready">Readiness</option>
+            <option value="mug">Biggest mug</option>
+            <option value="networth">Net worth</option>
+            <option value="ff">Easiest (FF)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Sticky soft-window alert -->
+      <div class="imminent-bar" id="mug-alert-bar" onclick="mugScrollToAlert()">
+        <span class="imminent-label"><span class="imminent-icon">💰</span><span id="mug-alert-text">—</span></span>
+        <span class="imminent-arrow">→</span>
+      </div>
+
+      <div class="mug-list" id="mug-list">
+        <div class="state-banner"><h3>No targets yet</h3><p>Add player IDs of known cash-carriers to watch for soft mug windows.</p></div>
+      </div>
+
+      <p class="fl-disclaimer" id="mug-disclaimer"></p>
+    </div>
+
     <!-- ─── Settings tab ─── -->
     <div class="content-frame" id="tab-settings">
       <div class="settings-page">
@@ -539,6 +578,8 @@ let flBoard={},flBoardMeta={},flItems={},flFlow={},flUnsubBoard=null,flUnsubItem
 // One-way standard flight times in seconds (mirror of functions/index.js FLIGHT_TIMES).
 const FL_TIMES={"Mexico":1560,"Canada":2220,"Cayman Islands":3420,"Hawaii":7260,"United Kingdom":9120,"Switzerland":10140,"Argentina":11340,"Japan":12180,"China":13140,"UAE":15540,"South Africa":18660};
 const FL_METHOD_MULT={standard:1,airstrip:0.70,wlt:0.50};
+// ─── Mug watchlist state ───
+let mugTargets=[],mugStatus={},mugScouterEnabled=false,mugLastPoll=0,mugUnsubConfig=null,mugUnsubStatus=null,mugAlertId=null;
 
 function showScreen(id){
   ['screen-loading','screen-landing','screen-verify','screen-onboarding','screen-app'].forEach(s=>{
@@ -591,6 +632,8 @@ window.signOut=async function(){
   if(flUnsubItems){flUnsubItems();flUnsubItems=null}
   if(flUnsubFlow){flUnsubFlow();flUnsubFlow=null}
   if(flUnsubConfig){flUnsubConfig();flUnsubConfig=null}
+  if(mugUnsubConfig){mugUnsubConfig();mugUnsubConfig=null}
+  if(mugUnsubStatus){mugUnsubStatus();mugUnsubStatus=null}
   closeProfileMenu();
   if(firebaseReady)await _fb.fbSignOut(auth);
   currentUser=null;userFactionId=null;showScreen('screen-landing');
@@ -631,7 +674,7 @@ window.updateScouterKey=async function(){
   }catch(e){alert('Failed: '+(e.message||'unknown error'))}
 };
 
-const WB_TABS=['home','heatmap','warbuddy','flights','settings'];
+const WB_TABS=['home','heatmap','warbuddy','flights','mug','settings'];
 window.switchTab=function(t){
   document.querySelectorAll('.nav-tab').forEach(b=>b.classList.toggle('active',b.dataset.tab===t));
   document.querySelectorAll('.content-frame').forEach(f=>f.classList.toggle('active',f.id==='tab-'+t));
@@ -680,6 +723,7 @@ function enterApp(){
   document.getElementById('settings-faction-id').textContent=userFactionId||'—';
   showScreen('screen-app');initHeatmap().then(()=>{intelInit();initWarBuddy().then(()=>intelTryShow())});
   initFlights();
+  initMug();
   // First-time visitors land on Home; returning users resume their last tab.
   let dest='heatmap';
   try{
@@ -1159,6 +1203,108 @@ window.flToggleFav=function(id,ev){
 };
 window.flSetCountry=function(c){flCountryFilter=c;flRender()};
 window.flToggleRow=function(id){flExpanded[id]=!flExpanded[id];flRender()};
+
+// ═══ MUG WATCHLIST ═══
+// Monitors curated player IDs for soft mug windows. Torn hides carried
+// cash, so signals are proxies: largestmug (proven carrier), FF (beat +
+// stealth), and idle-after-active timing from last_action.
+const MUG_READY={prime:{icon:'🔥',label:'Soft window'},soft:{icon:'💤',label:'Idle'},active:{icon:'⚡',label:'At keyboard'},toostrong:{icon:'🛡',label:'Too strong'},unavailable:{icon:'⛔',label:'Unavailable'},stale:{icon:'·',label:'Long idle'},error:{icon:'⚠',label:'Error'},pending:{icon:'·',label:'Pending'}};
+const MUG_RANK={prime:0,soft:1,active:2,toostrong:3,unavailable:4,stale:5,error:6,pending:7};
+
+function initMug(){
+  if(!firebaseReady||!userFactionId)return;
+  if(mugUnsubConfig)mugUnsubConfig();if(mugUnsubStatus)mugUnsubStatus();
+  mugUnsubConfig=_fb.onSnapshot(_fb.doc(db,'factions/'+userFactionId+'/mug_watchlist','config'),s=>{mugTargets=(s.exists()&&Array.isArray(s.data().targets))?s.data().targets:[];mugRender()});
+  mugUnsubStatus=_fb.onSnapshot(_fb.doc(db,'factions/'+userFactionId+'/mug_watchlist','status'),s=>{if(s.exists()){const d=s.data();mugStatus=d.targets||{};mugScouterEnabled=!!d.scouterEnabled;mugLastPoll=d.lastPoll||0}mugRender()});
+  if(!window._mugTicker)window._mugTicker=setInterval(()=>{if(document.getElementById('tab-mug')&&document.getElementById('tab-mug').classList.contains('active'))mugRender()},20000);
+}
+async function mugPersist(){
+  if(!firebaseReady||!userFactionId)return;
+  try{await _fb.setDoc(_fb.doc(db,'factions/'+userFactionId+'/mug_watchlist','config'),{targets:mugTargets,active:true,updatedAt:Math.floor(Date.now()/1000)})}
+  catch(e){console.error('mug config save failed',e)}
+}
+window.mugAdd=function(){
+  const inp=document.getElementById('mug-add-input');const raw=(inp.value||'').trim();
+  let id=null;const m=raw.match(/XID=(\d+)/i);if(m)id=m[1];else if(/^\d+$/.test(raw))id=raw;
+  if(!id){alert('Enter a numeric player ID or a profile URL (…XID=123).');return}
+  if(mugTargets.map(String).includes(String(id))){inp.value='';return}
+  mugTargets.push(parseInt(id));inp.value='';mugRender();mugPersist();
+};
+window.mugRemove=function(id){mugTargets=mugTargets.filter(t=>String(t)!==String(id));mugRender();mugPersist()};
+window.mugScrollToAlert=function(){if(!mugAlertId)return;const r=document.querySelector('.mug-row[data-mug-id="'+mugAlertId+'"]');if(r)r.scrollIntoView({behavior:'smooth',block:'center'})};
+
+function mugReadiness(t,now){
+  if(t.pending)return{tier:'pending'};
+  if(t.error)return{tier:'error'};
+  if(t.state!=='Okay'){const secs=t.statusUntil&&t.statusUntil>now?t.statusUntil-now:null;return{tier:'unavailable',secs}}
+  const winnable=t.fairFight==null?null:t.fairFight<3.7;
+  if(winnable===false)return{tier:'toostrong'};
+  if(t.lastActionStatus==='Online')return{tier:'active'};
+  const idleFor=t.lastActionTs?now-t.lastActionTs:null;
+  if(idleFor==null)return{tier:'soft'};
+  if(idleFor<6*3600)return{tier:'prime'};
+  if(idleFor<3*86400)return{tier:'soft'};
+  return{tier:'stale'};
+}
+function mugFFBadge(t){
+  if(t.fairFight==null&&t.bsEstimate==null){
+    return mugScouterEnabled?'<span class="wb-stat ff-unknown">🎯 ?</span>':'<span class="wb-stat ff-hint" onclick="switchTab(\'settings\')" title="Add an FF Scouter key in Settings → to score beatability &amp; stealth.">🎯 add FF key</span>';
+  }
+  const band=wbFFBand(t.fairFight);
+  const stealth={easy:'stealth likely',prime:'may be seen',tough:'likely seen',hard:'avoid'}[band.cls]||'';
+  const ff=t.fairFight!=null?'FF '+t.fairFight.toFixed(1):'';
+  return `<span class="wb-stat ff-${band.cls}" title="Beatability + stealth read">🎯 ${ff} · ${band.label}${stealth?' · '+stealth:''}</span>`;
+}
+function mugRowHtml(t,r,now){
+  const rm=`<button class="mug-remove" onclick="mugRemove('${t.id}')" title="Remove">✕</button>`;
+  const prof=`https://www.torn.com/profiles.php?XID=${t.id}`;
+  if(t.pending)return `<div class="mug-row ready-pending" data-mug-id="${t.id}"><div class="mug-id"><a href="${prof}" target="_blank" rel="noopener">${t.id}</a><span class="mug-meta">loading…</span></div><div class="mug-badges"><span class="mug-ready-badge ready-pending">· pending — first poll within ~5 min</span></div><div class="mug-actions">${rm}</div></div>`;
+  if(t.error)return `<div class="mug-row ready-error" data-mug-id="${t.id}"><div class="mug-id"><a href="${prof}" target="_blank" rel="noopener">${t.name}</a><span class="mug-meta">API error</span></div><div class="mug-badges"><span class="mug-ready-badge ready-error">⚠ ${t.error}</span></div><div class="mug-actions">${rm}</div></div>`;
+  const READY=MUG_READY[r.tier]||MUG_READY.soft;
+  const attackable=t.state==='Okay';
+  const stateLabel={Okay:'Okay',Hospital:'Hospital',Traveling:'Traveling',Abroad:'Abroad',Jail:'Jail'}[t.state]||t.state||'?';
+  const stateCls={Okay:'chip-okay',Hospital:'chip-hospital',Traveling:'chip-traveling',Abroad:'chip-abroad',Jail:'chip-jail'}[t.state]||'chip-unknown';
+  let sub;
+  if(r.tier==='unavailable')sub=stateLabel+(r.secs?' · avail in '+formatCountdown(r.secs):'');
+  else if(r.tier==='active')sub='at keyboard now — may bank/retaliate';
+  else if(r.tier==='toostrong')sub='you likely can’t beat or stealth';
+  else sub='last action '+(t.lastActionTs?timeAgo(t.lastActionTs):'—');
+  return `<div class="mug-row ready-${r.tier}" data-mug-id="${t.id}">
+    <div class="mug-id"><a href="${prof}" target="_blank" rel="noopener">${t.name}</a><span class="mug-meta">Lvl ${t.level||'?'}${t.job?' · '+t.job:''}</span></div>
+    <div class="mug-badges">
+      <span class="status-chip ${stateCls}"><span class="dot"></span>${stateLabel}</span>
+      ${mugFFBadge(t)}
+      <span class="mug-money" title="Biggest single mug ever taken off them · net worth">💰 ${flMoney(t.largestMug||0)}<span class="mug-net"> · net ${flMoney(t.networth||0)}</span></span>
+    </div>
+    <div class="mug-ready">
+      <span class="mug-ready-badge ready-${r.tier}">${READY.icon} ${READY.label}</span>
+      <span class="mug-sub">${sub}</span>
+    </div>
+    <div class="mug-actions">${attackable?`<a class="attack-btn attackable" href="https://www.torn.com/loader.php?sid=attack&user2ID=${t.id}" target="_blank" rel="noopener">⚔ Mug</a>`:''}${rm}</div>
+  </div>`;
+}
+function mugRender(){
+  const list=document.getElementById('mug-list');if(!list)return;
+  const now=Math.floor(Date.now()/1000);
+  document.getElementById('mug-meta-bar').innerHTML=mugTargets.length?`<div class="meta-item">Targets <span class="meta-value">${mugTargets.length}</span></div><div class="meta-item">Updated <span class="meta-value">${mugLastPoll?timeAgo(mugLastPoll):'—'}</span></div>`:'';
+  if(!mugTargets.length){list.innerHTML='<div class="state-banner"><h3>No targets yet</h3><p>Add player IDs of known cash-carriers to watch for soft mug windows.</p></div>';document.getElementById('mug-alert-bar').classList.remove('visible');document.getElementById('mug-disclaimer').textContent='';return}
+  let rows=mugTargets.map(id=>{const t=mugStatus[String(id)]||{id:String(id),name:String(id),pending:true};return{t,r:mugReadiness(t,now),id:String(id)}});
+  const sort=document.getElementById('mug-sort').value;
+  rows.sort((a,b)=>{
+    if(sort==='mug')return(b.t.largestMug||0)-(a.t.largestMug||0);
+    if(sort==='networth')return(b.t.networth||0)-(a.t.networth||0);
+    if(sort==='ff'){const av=a.t.fairFight!=null?a.t.fairFight:Infinity,bv=b.t.fairFight!=null?b.t.fairFight:Infinity;return av-bv}
+    return(MUG_RANK[a.r.tier]??9)-(MUG_RANK[b.r.tier]??9)||(b.t.largestMug||0)-(a.t.largestMug||0);
+  });
+  list.innerHTML=rows.map(x=>mugRowHtml(x.t,x.r,now)).join('');
+  const prime=rows.filter(x=>x.r.tier==='prime').sort((a,b)=>(b.t.largestMug||0)-(a.t.largestMug||0))[0];
+  const bar=document.getElementById('mug-alert-bar');
+  if(prime){mugAlertId=prime.id;document.getElementById('mug-alert-text').textContent=`${prime.t.name} — soft window · last action ${timeAgo(prime.t.lastActionTs)} · biggest mug ${flMoney(prime.t.largestMug||0)}`;bar.classList.add('visible')}
+  else{mugAlertId=null;bar.classList.remove('visible')}
+  let dis='Proxy signals only — carried cash is hidden by Torn. "Biggest mug" = the most cash ever mugged off them (proven carrier); FF covers both beatability and stealth / retaliation risk.';
+  if(!mugScouterEnabled)dis+=' Add an FF Scouter key in Settings to score beatability & stealth.';
+  document.getElementById('mug-disclaimer').textContent=dis;
+}
 
 // Compute a ranked row for every foreign item on the board.
 function flCompute(){
