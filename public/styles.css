@@ -1565,3 +1565,11 @@ input[type="text"] { width:140px; }
 .mug-baz-note { color:var(--text-muted); font-size:11px; }
 .mug-baz-warn { color:var(--awake); font-size:12px; line-height:1.5; }
 .mug-baz-warn b { color:var(--text); }
+
+/* Mug: company scan */
+.mug-co-btn {
+  border:1px solid var(--border-light); background:var(--surface2); color:var(--text-dim);
+  cursor:pointer; font-size:12px; padding:6px 9px; border-radius:7px; line-height:1;
+}
+.mug-co-btn:hover { color:var(--accent); border-color:var(--accent); background:var(--accent-dim); }
+.mug-co-chip { color:var(--text); }

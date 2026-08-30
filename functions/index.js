@@ -1529,8 +1529,9 @@ async function pollMugFaction(fdoc, now) {
   let scanFactions = Array.isArray(plan.data().scanFactions) ? plan.data().scanFactions.map(String) : [];
   if (plan.data().scanFaction && scanFactions.length === 0) scanFactions = [String(plan.data().scanFaction)]; // legacy
   scanFactions = [...new Set(scanFactions.filter(Boolean))];
+  let scanCompanies = Array.isArray(plan.data().scanCompanies) ? [...new Set(plan.data().scanCompanies.map(String).filter(Boolean))] : [];
   const ignoredSet = new Set((plan.data().ignored || []).map(String));
-  if (targets.length === 0 && scanFactions.length === 0) return;
+  if (targets.length === 0 && scanFactions.length === 0 && scanCompanies.length === 0) return;
 
   const cfg = await fdoc.ref.collection("internal").doc("config").get();
   if (!cfg.exists || !cfg.data().active) return;
@@ -1559,6 +1560,26 @@ async function pollMugFaction(fdoc, now) {
         console.error(`mug: scan faction ${fid} error:`, fd.error);
       }
     } catch (e) { console.error(`mug: scan faction ${fid} fetch failed:`, e); }
+  }
+  // Company scan — the "high-paying job + inactive" pool. Employees come
+  // with last_action + status like faction members; company profile gives
+  // income/rating so you can judge how lucrative the roster is.
+  const scanCompanyInfo = [];
+  for (const cid of scanCompanies) {
+    try {
+      const cr = await fetch(`https://api.torn.com/company/${cid}?selections=employees,profile&key=${apiKey}`);
+      const cd = await cr.json();
+      if (cd.error) { console.error(`mug: scan company ${cid} error:`, cd.error); continue; }
+      const prof = cd.company || {};
+      scanCompanyInfo.push({ id: cid, name: prof.name || cid, weekly_income: prof.weekly_income || 0, rating: prof.rating || 0 });
+      const emps = cd.company_employees || cd.employees || {};
+      for (const [id, e] of Object.entries(emps)) {
+        if (ignoredSet.has(String(id))) continue;
+        if ((e.status && e.status.state) === "Okay" && (e.last_action && e.last_action.status) !== "Online") {
+          cands.push({ id: String(id), ts: (e.last_action && e.last_action.timestamp) || 0 });
+        }
+      }
+    } catch (e) { console.error(`mug: scan company ${cid} fetch failed:`, e); }
   }
   cands.sort((a, b) => b.ts - a.ts); // freshest idle first
   // Reserve some of the 40-poll budget for bazaar-owner discovery below.
@@ -1621,6 +1642,7 @@ async function pollMugFaction(fdoc, now) {
         lastActionStatus: la.status || "Offline",
         job: d.job && d.job.company_name && d.job.company_name !== "None"
           ? `${d.job.position} @ ${d.job.company_name}` : null,
+        companyId: (d.job && d.job.company_id) || null,
         networth: ps.networth || 0,
         largestMug: ps.largestmug || 0,
         moneyMugged: ps.moneymugged || 0,
@@ -1693,6 +1715,7 @@ async function pollMugFaction(fdoc, now) {
     targets: out,
     scouterEnabled: !!scouterKey,
     scanFactionNames,
+    scanCompanyInfo,
     bazaarNoAccess,
     bazaarItems,
     lastPoll: now,
