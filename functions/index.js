@@ -1523,6 +1523,7 @@ async function pollMugFaction(fdoc, now) {
   let scanFactions = Array.isArray(plan.data().scanFactions) ? plan.data().scanFactions.map(String) : [];
   if (plan.data().scanFaction && scanFactions.length === 0) scanFactions = [String(plan.data().scanFaction)]; // legacy
   scanFactions = [...new Set(scanFactions.filter(Boolean))];
+  const ignoredSet = new Set((plan.data().ignored || []).map(String));
   if (targets.length === 0 && scanFactions.length === 0) return;
 
   const cfg = await fdoc.ref.collection("internal").doc("config").get();
@@ -1543,6 +1544,7 @@ async function pollMugFaction(fdoc, now) {
       if (!fd.error && fd.members) {
         scanFactionNames.push(fd.name || fid);
         for (const [id, m] of Object.entries(fd.members)) {
+          if (ignoredSet.has(String(id))) continue;
           if ((m.status && m.status.state) === "Okay" && (m.last_action && m.last_action.status) !== "Online") {
             cands.push({ id: String(id), ts: (m.last_action && m.last_action.timestamp) || 0 });
           }
