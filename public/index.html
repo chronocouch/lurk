@@ -1087,11 +1087,15 @@ window.wbRenderOpponents=function(){
   list.innerHTML='';
   if(!sorted.length){list.innerHTML='<div class="state-banner"><h3>No opponents match this filter</h3><p>Tap the chip again to clear.</p></div>';return}
   sorted.forEach(opp=>{
+    // Hospital/jail release is at an exact timestamp with NO grace period,
+    // so treat them as attackable the instant their timer elapses — don't
+    // wait for the next server poll to re-classify. (Landing keeps its 15s.)
+    const atk=attackable(opp.travelState)||((opp.travelState==='hospital'||opp.travelState==='jail')&&opp.statusUntil&&opp.statusUntil<=now);
     const row=document.createElement('div');
-    row.className='opponent-row '+(opp.travelState==='returning'?'status-returning':attackable(opp.travelState)?'status-okay':'');
+    row.className='opponent-row '+(opp.travelState==='returning'?'status-returning':atk?'status-okay':'');
     row.dataset.oppId=opp.id;
     const pc=document.createElement('div');pc.className='opp-person-cell';pc.innerHTML=`<span class="person-name"><a href="https://www.torn.com/profiles.php?XID=${opp.id}" target="_blank">${opp.name}</a></span><span class="person-meta">Lvl ${opp.level}${opp.position?' · '+opp.position:''}</span>`;
-    const sc=document.createElement('div');sc.className='status-cell';const atk=attackable(opp.travelState);
+    const sc=document.createElement('div');sc.className='status-cell';
     sc.innerHTML=`<div class="status-chip ${chipClass(opp.travelState)}"><span class="dot"></span>${statusLabel(opp.travelState)}</div>${atk?`<a href="https://www.torn.com/loader.php?sid=attack&user2ID=${opp.id}" target="_blank" class="attack-btn-inline attackable">⚔ Attack</a>`:''}`;
     const _secs=wbNextAttackable(opp,now);
     if(_secs>0&&_secs!==Infinity){const _c=wbCatch(opp.id,opp,now);sc.innerHTML+=`<div class="wb-catch ${_c.tier}" title="${wbCatchTip(_c).replace(/"/g,'&quot;')}">${CATCH_ICON[_c.tier]} ${CATCH_LABEL[_c.tier]}</div>`}
@@ -1105,8 +1109,9 @@ window.wbRenderOpponents=function(){
         tc.innerHTML=`<div class="travel-dest">${opp.travelState==='returning'?'From':'To'} ${dest}</div><div class="travel-times"><div class="time-est primary"><span class="label">Airstrip</span><span class="value" data-departed="${dep}" data-flightsec="${as}">${formatCountdown(as-(now-dep))}</span></div><div class="time-est"><span class="label">Standard</span><span class="value" data-departed="${dep}" data-flightsec="${std}">${formatCountdown(std-(now-dep))}</span></div><div class="time-est"><span class="label">WLT</span><span class="value" data-departed="${dep}" data-flightsec="${wlt}">${formatCountdown(wlt-(now-dep))}</span></div></div>`}
       else tc.innerHTML=`<div class="travel-dest">${opp.travelState==='returning'?'From':'To'} ${dest}</div><div class="travel-idle">Departure time unknown</div>`}
     else if(opp.travelState==='abroad')tc.innerHTML=`<div class="travel-dest">In ${opp.destination||opp.lastKnownDestination||'Unknown'}</div><div class="travel-idle">Waiting for return…</div>`;
-    else if(opp.travelState==='hospital'&&opp.statusUntil>now)tc.innerHTML=`<div class="hospital-timer" data-until="${opp.statusUntil}">Out in ${formatCountdown(opp.statusUntil-now)}</div>`;
-    else if(attackable(opp.travelState))tc.innerHTML=`<div class="travel-idle">${opp.lastActionTimestamp?'Last action '+timeAgo(opp.lastActionTimestamp):''}</div>`;
+    else if(opp.travelState==='hospital')tc.innerHTML=opp.statusUntil>now?`<div class="hospital-timer" data-until="${opp.statusUntil}">Out in ${formatCountdown(opp.statusUntil-now)}</div>`:`<div class="travel-idle">Out of hospital — attackable</div>`;
+    else if(opp.travelState==='jail')tc.innerHTML=opp.statusUntil>now?`<div class="hospital-timer" data-until="${opp.statusUntil}">Out in ${formatCountdown(opp.statusUntil-now)}</div>`:`<div class="travel-idle">Out of jail — attackable</div>`;
+    else if(atk)tc.innerHTML=`<div class="travel-idle">${opp.lastActionTimestamp?'Last action '+timeAgo(opp.lastActionTimestamp):''}</div>`;
     else tc.innerHTML=`<div class="travel-idle">${opp.statusDesc||'—'}</div>`;
     const ac=document.createElement('div');ac.className='action-cell';
     ac.innerHTML=`<a href="https://www.torn.com/loader.php?sid=attack&user2ID=${opp.id}" target="_blank" class="attack-btn ${atk?'attackable':'disabled'}">⚔ Attack</a>`;
@@ -1171,7 +1176,11 @@ function wbStartTicker(){
         if(rem<=0){v.textContent='PASSED';est.classList.add('passed');est.classList.remove('primary')}
         else{v.textContent=formatCountdown(rem);if(fa===-1)fa=i;v.className=rem<30?'value countdown-val hot':rem<120?'value countdown-val warm':'value'}});
       ests.forEach((est,i)=>{if(!est.classList.contains('passed'))est.classList.toggle('primary',i===fa)})});
-    document.querySelectorAll('.hospital-timer[data-until]').forEach(el=>{const rem=parseInt(el.dataset.until)-now;el.textContent=rem<=0?'Should be out!':'Out in '+formatCountdown(rem)});
+    let _hospFlip=false;
+    document.querySelectorAll('.hospital-timer[data-until]').forEach(el=>{const rem=parseInt(el.dataset.until)-now;el.textContent=rem<=0?'Should be out!':'Out in '+formatCountdown(rem);
+      if(rem<=0){const row=el.closest('.opponent-row');if(row&&!row.classList.contains('status-okay'))_hospFlip=true}});
+    // A hospital/jail timer just elapsed — re-render so the attack button activates now.
+    if(_hospFlip)wbRenderOpponents();
     updateImminent();
   },1000);
 }
