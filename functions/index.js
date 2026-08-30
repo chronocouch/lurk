@@ -1683,6 +1683,37 @@ async function pollMugFaction(fdoc, now) {
     }
   }
 
+  // ── Company rating/income for each target's company (cached ~1h) ──
+  // Lets the UI highlight "scan their company" only for high-value rosters.
+  try {
+    const ccDoc = await fdoc.ref.collection("mug_watchlist").doc("company_cache").get();
+    const cc = ccDoc.exists ? ccDoc.data().c || {} : {};
+    let ccChanged = false;
+    const needed = [...new Set(Object.values(out).filter((o) => !o.error && o.companyId).map((o) => String(o.companyId)))];
+    for (const cid of needed) {
+      const cached = cc[cid];
+      if (cached && cached.ts && now - cached.ts < 3600) continue;
+      try {
+        const cr = await fetch(`https://api.torn.com/company/${cid}?selections=profile&key=${apiKey}`);
+        const cd = await cr.json();
+        if (!cd.error && cd.company) {
+          cc[cid] = { name: cd.company.name || cid, rating: cd.company.rating || 0, income: cd.company.weekly_income || 0, ts: now };
+          ccChanged = true;
+        }
+      } catch (e) { /* non-fatal */ }
+    }
+    for (const id of Object.keys(out)) {
+      const o = out[id];
+      if (o.error || !o.companyId) continue;
+      const c = cc[String(o.companyId)];
+      if (c) { o.coName = c.name; o.coRating = c.rating; o.coIncome = c.income; }
+    }
+    for (const cid of Object.keys(cc)) {
+      if (cc[cid].ts && now - cc[cid].ts > 2 * 86400) { delete cc[cid]; ccChanged = true; }
+    }
+    if (ccChanged || !ccDoc.exists) await fdoc.ref.collection("mug_watchlist").doc("company_cache").set({ c: cc, lastUpdated: now });
+  } catch (e) { console.error("mug: company cache failed:", e); }
+
   // ── Exposure tracking (mug "catchability") ──
   // How often is each target actually attackable ("Okay") vs protecting
   // themselves (hospital/travel/jail)? Same self-protection tactics as war
@@ -1698,11 +1729,18 @@ async function pollMugFaction(fdoc, now) {
       s.polls++;
       if (o.state === "Okay") { s.okay++; if (o.lastActionStatus !== "Online") s.afkOkay++; }
       else if (PROTECTED.includes(o.state)) s.prot++;
+      // Detect a mug ON them: their total money-mugged rising = someone
+      // just took their pile. Lets us know if the stacked cash is gone.
+      if (o.moneyMugged != null) {
+        if (s.prevMM != null && o.moneyMugged > s.prevMM) s.lastMugged = now;
+        s.prevMM = o.moneyMugged;
+      }
       s.lastSeen = now;
       tg[id] = s;
       o.exposure = s.polls >= 4 ? Math.round((s.okay / s.polls) * 100) / 100 : null;
       o.afkExposure = s.okay >= 3 ? Math.round((s.afkOkay / s.okay) * 100) / 100 : null;
       o.expSamples = s.polls;
+      o.lastMuggedTs = s.lastMugged || null;
     }
     // Prune targets not seen in 7 days.
     for (const id of Object.keys(tg)) {

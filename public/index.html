@@ -1305,9 +1305,13 @@ function mugPaydaysSince(lastTs,now){
   let n=0;while(b<=now){n++;b+=86400}return n;
 }
 function mugSecsToPayday(now){const d=new Date(now*1000);let b=Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate(),18,0,0)/1000;if(b<=now)b+=86400;return b-now}
+// A mug on them empties the pile, so only paydays since the LATER of their
+// last action or last-observed mugging count as still-unbanked.
+function mugEffReset(t){return Math.max(t.lastActionTs||0,t.lastMuggedTs||0)}
+function mugPaydayCount(t,now){return mugPaydaysSince(mugEffReset(t),now)}
 function mugPaydayScore(t,now){
   if(!t.job||t.state!=='Okay')return 0;
-  return Math.min(mugPaydaysSince(t.lastActionTs,now),7);
+  return Math.min(mugPaydayCount(t,now),7);
 }
 // Mug catchability: how often are they actually attackable vs protecting
 // themselves (hospital/travel)? Same idea as war bagging discipline.
@@ -1381,7 +1385,7 @@ function mugRowHtml(t,r,now){
       ${(()=>{const c=mugCatch(t);return `<span class="wb-catch ${c.cls}" title="${(c.tip||'').replace(/"/g,'&quot;')}">${c.icon} ${c.label}</span>`})()}
       <span class="mug-money" title="Biggest single mug ever taken off them · net worth">💰 ${flMoney(t.largestMug||0)}<span class="mug-net"> · net ${flMoney(t.networth||0)}</span></span>
       ${t.bazaarOpen?`<span class="mug-baz" title="Open bazaar${t.bazaarName?' — '+t.bazaarName:''} · ${(t.weeklyCustomers||0).toLocaleString()} customers/week">🏪 open · ${wbNum(t.weeklyCustomers||0)}/wk</span>`:''}
-      ${(t.job&&t.state==='Okay'&&mugPaydaysSince(t.lastActionTs,now)>=1)?(()=>{const p=mugPaydaysSince(t.lastActionTs,now);return `<span class="mug-payday" title="Salaried job — paid daily at 18:00 TCT and unbanked while idle. ${p} payday${p>1?'s':''} stacked up.">💵 ~${p} payday${p>1?'s':''} unbanked</span>`})():''}
+      ${(t.job&&t.state==='Okay'&&mugPaydayCount(t,now)>=1)?(()=>{const p=mugPaydayCount(t,now);const watched=(t.expSamples||0)>=4;const clean=watched&&!t.lastMuggedTs;const mugTxt=t.lastMuggedTs?' · last mugged '+timeAgo(t.lastMuggedTs):(watched?' · no mug seen — pile likely intact':'');return `<span class="mug-payday${clean?' clean':''}" title="Salaried — paid daily at 18:00 TCT, unbanked while idle. ${p} payday${p>1?'s':''} stacked${mugTxt}.">💵 ~${p} payday${p>1?'s':''}${clean?' · clean':''}</span>`})():''}
       ${(()=>{const a=mugArchetype(t);return a?`<span class="mug-arch arch-${a.cls}" title="${a.title}">${a.icon} ${a.label}</span>`:''})()}
       ${(t.scanned&&!isManual)?'<span class="mug-scanned-tag" title="Found by faction scan — not on your watchlist">scanned</span>':''}
     </div>
@@ -1389,7 +1393,7 @@ function mugRowHtml(t,r,now){
       <span class="mug-ready-badge ready-${r.tier}">${READY.icon} ${READY.label}</span>
       <span class="mug-sub">${sub}</span>
     </div>
-    <div class="mug-actions">${attackable?`<a class="attack-btn attackable" href="https://www.torn.com/loader.php?sid=attack&user2ID=${t.id}" target="_blank" rel="noopener">⚔ Mug</a>`:''}${t.companyId?`<button class="mug-co-btn" onclick="mugScanTheirCompany('${t.companyId}')" title="Scan their company for more idle job-holders">🏢</button>`:''}${rm}</div>
+    <div class="mug-actions">${attackable?`<a class="attack-btn attackable" href="https://www.torn.com/loader.php?sid=attack&user2ID=${t.id}" target="_blank" rel="noopener">⚔ Mug</a>`:''}${t.companyId?(()=>{const hi=(t.coRating||0)>=8;const info=t.coName?`${t.coName}${t.coIncome?' · '+flMoney(t.coIncome)+'/wk':''}${t.coRating?' · '+t.coRating+'★':''}`:'their company';return `<button class="mug-co-btn${hi?' high':''}" onclick="mugScanTheirCompany('${t.companyId}')" title="Scan ${info.replace(/"/g,'&quot;')} for more idle job-holders${hi?' — high-value roster!':''}">🏢${hi?' ★':''}</button>`})():''}${rm}</div>
   </div>`;
 }
 function mugRender(){

@@ -1585,3 +1585,7 @@ input[type="text"] { width:140px; }
   font-size:10px; font-weight:600; padding:2px 7px; border-radius:10px; white-space:nowrap;
   color:var(--active); border:1px solid rgba(52,211,153,0.45); background:var(--active-bg);
 }
+
+.mug-payday.clean { border-color:var(--active); box-shadow:0 0 0 1px rgba(52,211,153,0.3); }
+.mug-co-btn.high { color:var(--awake); border-color:rgba(251,191,36,0.5); background:var(--awake-bg); font-weight:600; }
+.mug-co-btn.high:hover { color:var(--awake); border-color:var(--awake); background:rgba(251,191,36,0.2); }
