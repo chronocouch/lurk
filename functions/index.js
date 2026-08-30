@@ -1555,9 +1555,43 @@ async function pollMugFaction(fdoc, now) {
     } catch (e) { console.error(`mug: scan faction ${fid} fetch failed:`, e); }
   }
   cands.sort((a, b) => b.ts - a.ts); // freshest idle first
-  const cap = Math.max(0, 40 - idList.length);
-  for (const c of cands.slice(0, cap)) {
+  // Reserve some of the 40-poll budget for bazaar-owner discovery below.
+  const scanCap = Math.max(0, Math.min(25, 40 - idList.length));
+  for (const c of cands.slice(0, scanCap)) {
     if (!idList.includes(c.id)) { idList.push(c.id); scannedSet.add(c.id); }
+  }
+
+  // ── Busy-bazaar index (needs market access on the owner key) ──
+  // v2 market/{itemId}/bazaar lists the busiest bazaars selling an item,
+  // each with the owner's player id + is_open + weekly_customers. We use
+  // it both to enrich targets and to discover busy merchants who've gone
+  // idle (open bazaar × volume × idle = big unbanked pile).
+  const bazaarItems = (Array.isArray(plan.data().bazaarItems) && plan.data().bazaarItems.length)
+    ? plan.data().bazaarItems.map(String) : ["206"]; // default: Xanax
+  const ownerIdx = {}; // playerId -> { name, is_open, weekly_customers }
+  let bazaarNoAccess = false;
+  for (const item of bazaarItems) {
+    try {
+      const r = await fetch(`https://api.torn.com/v2/market/${item}/bazaar?key=${apiKey}`);
+      const bd = await r.json();
+      if (bd && bd.error) { if (bd.error.code === 16) bazaarNoAccess = true; continue; }
+      const bz = bd && bd.bazaar ? bd.bazaar : {};
+      const list = [].concat(bz.specialized || [], bz.regular || []);
+      for (const b of list) {
+        const oid = String(b.id);
+        const wc = b.weekly_customers || 0;
+        const p = ownerIdx[oid];
+        if (!p) ownerIdx[oid] = { name: b.name || oid, is_open: !!b.is_open, weekly_customers: wc };
+        else { p.weekly_customers = Math.max(p.weekly_customers, wc); p.is_open = p.is_open || !!b.is_open; }
+      }
+    } catch (e) { console.error(`mug: bazaar item ${item} fetch failed:`, e); }
+  }
+  // Add the busiest open bazaars as discovery candidates (fill remaining budget).
+  const bazOwners = Object.entries(ownerIdx).filter(([, o]) => o.is_open)
+    .sort((a, b) => b[1].weekly_customers - a[1].weekly_customers);
+  for (const [oid] of bazOwners) {
+    if (idList.length >= 40) break;
+    if (!idList.includes(oid) && !ignoredSet.has(oid)) { idList.push(oid); scannedSet.add(oid); }
   }
   if (idList.length === 0) return;
 
@@ -1591,6 +1625,16 @@ async function pollMugFaction(fdoc, now) {
     }
   }
 
+  // Enrich with bazaar info (open + weekly customers) for known owners.
+  for (const id of Object.keys(out)) {
+    const o = ownerIdx[id];
+    if (o && !out[id].error) {
+      out[id].bazaarOpen = o.is_open;
+      out[id].weeklyCustomers = o.weekly_customers;
+      out[id].bazaarName = o.name;
+    }
+  }
+
   if (scouterKey) {
     const ids = Object.keys(out).filter((id) => !out[id].error);
     for (let i = 0; i < ids.length; i += 200) {
@@ -1615,6 +1659,8 @@ async function pollMugFaction(fdoc, now) {
     targets: out,
     scouterEnabled: !!scouterKey,
     scanFactionNames,
+    bazaarNoAccess,
+    bazaarItems,
     lastPoll: now,
   });
   console.log(`mug: polled ${Object.keys(out).length} (scans:${scanFactionNames.join(",") || "none"}) faction ${fdoc.id}`);

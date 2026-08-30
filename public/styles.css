@@ -1551,3 +1551,17 @@ input[type="text"] { width:140px; }
   border:1px solid var(--border); border-radius:8px; padding:7px 10px; font-size:13px; outline:none;
 }
 .fl-sort-group input[type=number]:focus { border-color:var(--accent); }
+
+/* Mug: busy-bazaar radar */
+.mug-baz {
+  font-size:10px; font-weight:600; padding:2px 7px; border-radius:10px; white-space:nowrap;
+  color:var(--abroad); border:1px solid rgba(167,139,250,0.4); background:var(--abroad-bg);
+}
+.mug-baz-bar {
+  display:flex; flex-wrap:wrap; align-items:center; gap:6px 8px; font-size:12px; color:var(--text-dim);
+  margin:0 0 12px; padding:8px 12px; background:var(--surface);
+  border:1px solid var(--border); border-radius:8px;
+}
+.mug-baz-note { color:var(--text-muted); font-size:11px; }
+.mug-baz-warn { color:var(--awake); font-size:12px; line-height:1.5; }
+.mug-baz-warn b { color:var(--text); }

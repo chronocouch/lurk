@@ -448,6 +448,8 @@
         <button class="btn btn-secondary" onclick="mugAdd()">Add target</button>
         <input type="text" id="mug-scan-input" class="fl-search" placeholder="Scan a faction ID for soft members…" autocomplete="off" onkeydown="if(event.key==='Enter')mugSetScan()">
         <button class="btn btn-secondary" onclick="mugSetScan()">Scan faction</button>
+        <input type="text" id="mug-baz-input" class="fl-search" placeholder="Bazaar radar item ID (206=Xanax)…" autocomplete="off" onkeydown="if(event.key==='Enter')mugAddBazaarItem()">
+        <button class="btn btn-secondary" onclick="mugAddBazaarItem()">Add item</button>
         <div class="control-group fl-sort-group">
           <label>Min biggest mug ($m)</label>
           <input type="number" id="mug-min-input" min="0" step="0.1" style="width:90px" value="0" onchange="mugSetMin()" title="Hide scanned members whose biggest-ever mug is below this (in millions)">
@@ -456,6 +458,7 @@
           <label>Sort</label>
           <select id="mug-sort" onchange="mugRender()">
             <option value="ready">Readiness</option>
+            <option value="bazaar">Forgotten bazaars</option>
             <option value="mug">Biggest mug (jackpot)</option>
             <option value="grinder">Steady earners</option>
             <option value="networth">Net worth</option>
@@ -464,6 +467,7 @@
         </div>
       </div>
       <div class="mug-scan-active" id="mug-scan-active" style="display:none"></div>
+      <div class="mug-baz-bar" id="mug-baz-bar"></div>
 
       <!-- Sticky soft-window alert -->
       <div class="imminent-bar" id="mug-alert-bar" onclick="mugScrollToAlert()">
@@ -587,7 +591,8 @@ let flBoard={},flBoardMeta={},flItems={},flFlow={},flUnsubBoard=null,flUnsubItem
 const FL_TIMES={"Mexico":1560,"Canada":2220,"Cayman Islands":3420,"Hawaii":7260,"United Kingdom":9120,"Switzerland":10140,"Argentina":11340,"Japan":12180,"China":13140,"UAE":15540,"South Africa":18660};
 const FL_METHOD_MULT={standard:1,airstrip:0.70,wlt:0.50};
 // ─── Mug watchlist state ───
-let mugTargets=[],mugStatus={},mugScouterEnabled=false,mugLastPoll=0,mugUnsubConfig=null,mugUnsubStatus=null,mugAlertId=null,mugScanFactions=[],mugScanFactionNames=[],mugIgnored=[],mugMinMug=0;
+let mugTargets=[],mugStatus={},mugScouterEnabled=false,mugLastPoll=0,mugUnsubConfig=null,mugUnsubStatus=null,mugAlertId=null,mugScanFactions=[],mugScanFactionNames=[],mugIgnored=[],mugMinMug=0,mugBazaarItems=[],mugBazaarNoAccess=false;
+const MUG_ITEM_NAMES={'206':'Xanax'};
 
 function showScreen(id){
   ['screen-loading','screen-landing','screen-verify','screen-onboarding','screen-app'].forEach(s=>{
@@ -1222,14 +1227,14 @@ const MUG_RANK={prime:0,soft:1,active:2,toostrong:3,unavailable:4,stale:5,error:
 function initMug(){
   if(!firebaseReady||!userFactionId)return;
   if(mugUnsubConfig)mugUnsubConfig();if(mugUnsubStatus)mugUnsubStatus();
-  mugUnsubConfig=_fb.onSnapshot(_fb.doc(db,'factions/'+userFactionId+'/mug_watchlist','config'),s=>{const d=s.exists()?s.data():{};mugTargets=Array.isArray(d.targets)?d.targets:[];mugScanFactions=Array.isArray(d.scanFactions)?d.scanFactions.map(String):(d.scanFaction?[String(d.scanFaction)]:[]);mugIgnored=Array.isArray(d.ignored)?d.ignored.map(String):[];mugRender()});
+  mugUnsubConfig=_fb.onSnapshot(_fb.doc(db,'factions/'+userFactionId+'/mug_watchlist','config'),s=>{const d=s.exists()?s.data():{};mugTargets=Array.isArray(d.targets)?d.targets:[];mugScanFactions=Array.isArray(d.scanFactions)?d.scanFactions.map(String):(d.scanFaction?[String(d.scanFaction)]:[]);mugIgnored=Array.isArray(d.ignored)?d.ignored.map(String):[];mugBazaarItems=Array.isArray(d.bazaarItems)?d.bazaarItems.map(String):[];mugRender()});
   try{mugMinMug=parseInt(localStorage.getItem('mug_min'))||0}catch(e){}
-  mugUnsubStatus=_fb.onSnapshot(_fb.doc(db,'factions/'+userFactionId+'/mug_watchlist','status'),s=>{if(s.exists()){const d=s.data();mugStatus=d.targets||{};mugScouterEnabled=!!d.scouterEnabled;mugScanFactionNames=Array.isArray(d.scanFactionNames)?d.scanFactionNames:(d.scanFactionName?[d.scanFactionName]:[]);mugLastPoll=d.lastPoll||0}mugRender()});
+  mugUnsubStatus=_fb.onSnapshot(_fb.doc(db,'factions/'+userFactionId+'/mug_watchlist','status'),s=>{if(s.exists()){const d=s.data();mugStatus=d.targets||{};mugScouterEnabled=!!d.scouterEnabled;mugScanFactionNames=Array.isArray(d.scanFactionNames)?d.scanFactionNames:(d.scanFactionName?[d.scanFactionName]:[]);mugBazaarNoAccess=!!d.bazaarNoAccess;mugLastPoll=d.lastPoll||0}mugRender()});
   if(!window._mugTicker)window._mugTicker=setInterval(()=>{if(document.getElementById('tab-mug')&&document.getElementById('tab-mug').classList.contains('active'))mugRender()},20000);
 }
 async function mugPersist(){
   if(!firebaseReady||!userFactionId)return;
-  try{await _fb.setDoc(_fb.doc(db,'factions/'+userFactionId+'/mug_watchlist','config'),{targets:mugTargets,scanFactions:mugScanFactions.map(Number),ignored:mugIgnored.map(Number),scanFaction:_fb.deleteField(),active:true,updatedAt:Math.floor(Date.now()/1000)})}
+  try{await _fb.setDoc(_fb.doc(db,'factions/'+userFactionId+'/mug_watchlist','config'),{targets:mugTargets,scanFactions:mugScanFactions.map(Number),ignored:mugIgnored.map(Number),bazaarItems:mugBazaarItems.map(Number),scanFaction:_fb.deleteField(),active:true,updatedAt:Math.floor(Date.now()/1000)})}
   catch(e){console.error('mug config save failed',e)}
 }
 window.mugAdd=function(){
@@ -1252,6 +1257,15 @@ window.mugSetScan=function(){
   inp.value='';mugRender();mugPersist();
 };
 window.mugClearScan=function(id){mugScanFactions=mugScanFactions.filter(f=>String(f)!==String(id));mugRender();mugPersist()};
+window.mugAddBazaarItem=function(){const inp=document.getElementById('mug-baz-input');const raw=(inp.value||'').trim();const id=/^\d+$/.test(raw)?raw:((raw.match(/(\d+)/)||[])[1]);if(!id){alert('Enter a numeric item ID (e.g. 206 = Xanax).');return}if(!mugBazaarItems.map(String).includes(String(id)))mugBazaarItems.push(parseInt(id));inp.value='';mugRender();mugPersist()};
+window.mugRemoveBazaarItem=function(id){mugBazaarItems=mugBazaarItems.filter(i=>String(i)!==String(id));mugRender();mugPersist()};
+// "Forgotten bazaar" score: open bazaar × weekly-customer volume × idle hours,
+// capped. Active owners (Online / just acted) fall to ~0.
+function mugBazScore(t,now){
+  if(!t.bazaarOpen||!t.weeklyCustomers||t.state!=='Okay'||t.lastActionStatus==='Online')return 0;
+  const idleH=t.lastActionTs?Math.min(24,(now-t.lastActionTs)/3600):0;
+  return t.weeklyCustomers*idleH;
+}
 window.mugScrollToAlert=function(){if(!mugAlertId)return;const r=document.querySelector('.mug-row[data-mug-id="'+mugAlertId+'"]');if(r)r.scrollIntoView({behavior:'smooth',block:'center'})};
 
 function mugReadiness(t,now){
@@ -1309,6 +1323,7 @@ function mugRowHtml(t,r,now){
       <span class="status-chip ${stateCls}"><span class="dot"></span>${stateLabel}</span>
       ${mugFFBadge(t)}
       <span class="mug-money" title="Biggest single mug ever taken off them · net worth">💰 ${flMoney(t.largestMug||0)}<span class="mug-net"> · net ${flMoney(t.networth||0)}</span></span>
+      ${t.bazaarOpen?`<span class="mug-baz" title="Open bazaar${t.bazaarName?' — '+t.bazaarName:''} · ${(t.weeklyCustomers||0).toLocaleString()} customers/week">🏪 open · ${wbNum(t.weeklyCustomers||0)}/wk</span>`:''}
       ${(()=>{const a=mugArchetype(t);return a?`<span class="mug-arch arch-${a.cls}" title="${a.title}">${a.icon} ${a.label}</span>`:''})()}
       ${(t.scanned&&!isManual)?'<span class="mug-scanned-tag" title="Found by faction scan — not on your watchlist">scanned</span>':''}
     </div>
@@ -1329,6 +1344,15 @@ function mugRender(){
     const chips=mugScanFactions.map((f,i)=>`<span class="mug-scan-chip">${mugScanFactionNames[i]||('faction '+f)}<button onclick="mugClearScan('${f}')" title="Stop scanning this faction">✕</button></span>`).join('');
     scanEl.innerHTML=`<span class="mug-scan-lbl">Scanning for idle, attackable members:</span>${chips}`;
   } else scanEl.style.display='none';
+  // Bazaar radar bar
+  const bazEl=document.getElementById('mug-baz-bar');bazEl.style.display='';
+  if(mugBazaarNoAccess){
+    bazEl.innerHTML='<span class="mug-baz-warn">🏪 Open-bazaar detection needs a Torn key with <b>market</b> access (Full, or a Custom key). Update it in <button class="mug-link" onclick="switchTab(\'settings\')">Settings</button>.</span>';
+  }else{
+    const items=mugBazaarItems.length?mugBazaarItems:['206'];
+    const chips=items.map(i=>`<span class="mug-scan-chip">${MUG_ITEM_NAMES[String(i)]||('item '+i)}${mugBazaarItems.length?`<button onclick="mugRemoveBazaarItem('${i}')" title="Remove from radar">✕</button>`:''}</span>`).join('');
+    bazEl.innerHTML=`<span class="mug-scan-lbl">🏪 Busy-bazaar radar — items:</span>${chips}${mugBazaarItems.length?'':'<span class="mug-baz-note">(default: Xanax — add high-turnover item IDs)</span>'}`;
+  }
   // Union of manual targets + scanned candidates (from status)
   const ids=new Set(mugTargets.map(String));
   Object.keys(mugStatus).forEach(id=>ids.add(String(id)));
@@ -1353,6 +1377,7 @@ function mugRender(){
   if(extra.length)document.getElementById('mug-meta-bar').insertAdjacentHTML('beforeend',extra.join(''));
   const sort=document.getElementById('mug-sort').value;
   rows.sort((a,b)=>{
+    if(sort==='bazaar')return mugBazScore(b.t,now)-mugBazScore(a.t,now);
     if(sort==='mug')return(b.t.largestMug||0)-(a.t.largestMug||0);
     if(sort==='grinder')return mugGrinderScore(b.t)-mugGrinderScore(a.t);
     if(sort==='networth')return(b.t.networth||0)-(a.t.networth||0);
