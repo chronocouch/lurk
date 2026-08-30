@@ -1573,3 +1573,10 @@ input[type="text"] { width:140px; }
 }
 .mug-co-btn:hover { color:var(--accent); border-color:var(--accent); background:var(--accent-dim); }
 .mug-co-chip { color:var(--text); }
+
+.mug-tip {
+  font-size:12px; color:var(--text-dim); line-height:1.6; margin:0 0 12px;
+  padding:9px 12px; background:var(--accent-dim); border:1px solid rgba(108,156,252,0.25);
+  border-radius:8px;
+}
+.mug-tip b { color:var(--text); font-weight:600; }
