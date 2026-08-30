@@ -448,7 +448,8 @@
         <button class="btn btn-secondary" onclick="mugAdd()">Add target</button>
         <input type="text" id="mug-scan-input" class="fl-search" placeholder="Scan a faction ID for soft members…" autocomplete="off" onkeydown="if(event.key==='Enter')mugSetScan()">
         <button class="btn btn-secondary" onclick="mugSetScan()">Scan faction</button>
-        <input type="text" id="mug-baz-input" class="fl-search" placeholder="Bazaar radar item ID (206=Xanax)…" autocomplete="off" onkeydown="if(event.key==='Enter')mugAddBazaarItem()">
+        <input type="text" id="mug-baz-input" class="fl-search" list="mug-item-list" placeholder="Bazaar radar — search item (e.g. Xanax)…" autocomplete="off" onkeydown="if(event.key==='Enter')mugAddBazaarItem()">
+        <datalist id="mug-item-list"></datalist>
         <button class="btn btn-secondary" onclick="mugAddBazaarItem()">Add item</button>
         <div class="control-group fl-sort-group">
           <label>Min biggest mug ($m)</label>
@@ -592,7 +593,7 @@ const FL_TIMES={"Mexico":1560,"Canada":2220,"Cayman Islands":3420,"Hawaii":7260,
 const FL_METHOD_MULT={standard:1,airstrip:0.70,wlt:0.50};
 // ─── Mug watchlist state ───
 let mugTargets=[],mugStatus={},mugScouterEnabled=false,mugLastPoll=0,mugUnsubConfig=null,mugUnsubStatus=null,mugAlertId=null,mugScanFactions=[],mugScanFactionNames=[],mugIgnored=[],mugMinMug=0,mugBazaarItems=[],mugBazaarNoAccess=false;
-const MUG_ITEM_NAMES={'206':'Xanax'};
+let MUG_ITEM_NAMES={'206':'Xanax'};let mugNameToId={};
 
 function showScreen(id){
   ['screen-loading','screen-landing','screen-verify','screen-onboarding','screen-app'].forEach(s=>{
@@ -1231,6 +1232,12 @@ function initMug(){
   try{mugMinMug=parseInt(localStorage.getItem('mug_min'))||0}catch(e){}
   mugUnsubStatus=_fb.onSnapshot(_fb.doc(db,'factions/'+userFactionId+'/mug_watchlist','status'),s=>{if(s.exists()){const d=s.data();mugStatus=d.targets||{};mugScouterEnabled=!!d.scouterEnabled;mugScanFactionNames=Array.isArray(d.scanFactionNames)?d.scanFactionNames:(d.scanFactionName?[d.scanFactionName]:[]);mugBazaarNoAccess=!!d.bazaarNoAccess;mugLastPoll=d.lastPoll||0}mugRender()});
   if(!window._mugTicker)window._mugTicker=setInterval(()=>{if(document.getElementById('tab-mug')&&document.getElementById('tab-mug').classList.contains('active'))mugRender()},20000);
+  // Load the global item name↔ID map for the bazaar-radar typeahead.
+  if(!Object.keys(mugNameToId).length){_fb.getDoc(_fb.doc(db,'travel_market','item_names')).then(s=>{
+    if(!s.exists())return;const items=s.data().items||{};MUG_ITEM_NAMES=items;mugNameToId={};
+    const opts=[];for(const[id,nm]of Object.entries(items)){if(nm){mugNameToId[String(nm).toLowerCase()]=id;opts.push('<option value="'+String(nm).replace(/"/g,'&quot;')+'">')}}
+    const dl=document.getElementById('mug-item-list');if(dl)dl.innerHTML=opts.join('');mugRender();
+  }).catch(()=>{})}
 }
 async function mugPersist(){
   if(!firebaseReady||!userFactionId)return;
@@ -1257,7 +1264,16 @@ window.mugSetScan=function(){
   inp.value='';mugRender();mugPersist();
 };
 window.mugClearScan=function(id){mugScanFactions=mugScanFactions.filter(f=>String(f)!==String(id));mugRender();mugPersist()};
-window.mugAddBazaarItem=function(){const inp=document.getElementById('mug-baz-input');const raw=(inp.value||'').trim();const id=/^\d+$/.test(raw)?raw:((raw.match(/(\d+)/)||[])[1]);if(!id){alert('Enter a numeric item ID (e.g. 206 = Xanax).');return}if(!mugBazaarItems.map(String).includes(String(id)))mugBazaarItems.push(parseInt(id));inp.value='';mugRender();mugPersist()};
+window.mugAddBazaarItem=function(){
+  const inp=document.getElementById('mug-baz-input');const raw=(inp.value||'').trim();if(!raw)return;
+  let id=null;
+  if(/^\d+$/.test(raw))id=raw;
+  else if(mugNameToId[raw.toLowerCase()])id=mugNameToId[raw.toLowerCase()];
+  else{const m=raw.match(/(\d+)/);if(m)id=m[1];}
+  if(!id){alert('Item not found — type a name (e.g. Xanax) and pick it from the list.');return}
+  if(!mugBazaarItems.map(String).includes(String(id)))mugBazaarItems.push(parseInt(id));
+  inp.value='';mugRender();mugPersist();
+};
 window.mugRemoveBazaarItem=function(id){mugBazaarItems=mugBazaarItems.filter(i=>String(i)!==String(id));mugRender();mugPersist()};
 // "Forgotten bazaar" score: open bazaar × weekly-customer volume × idle hours,
 // capped. Active owners (Online / just acted) fall to ~0.

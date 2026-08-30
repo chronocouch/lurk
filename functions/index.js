@@ -1325,7 +1325,13 @@ exports.collectTravelMarket = onSchedule(
       const res = await fetch(`https://api.torn.com/torn/?selections=items&key=${apiKey}`);
       const d = await res.json();
       if (!d.error && d.items) {
-        for (const [id, it] of Object.entries(d.items)) marketValues[id] = it.market_value || 0;
+        const names = {};
+        for (const [id, it] of Object.entries(d.items)) {
+          marketValues[id] = it.market_value || 0;
+          names[id] = it.name || String(id);
+        }
+        // Global id -> name map so the UI can offer item search by name.
+        await db.collection("travel_market").doc("item_names").set({ items: names, lastUpdated: now });
       } else if (d.error) {
         console.error("flight: torn/items error:", d.error);
       }
