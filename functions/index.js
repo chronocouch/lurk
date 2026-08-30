@@ -1562,8 +1562,6 @@ async function pollMugFaction(fdoc, now) {
   if (idList.length === 0) return;
 
   const out = {};
-  let bazaarNoAccess = false;
-  let bzLogged = false;
   for (const id of idList) {
     const scanned = scannedSet.has(id);
     try {
@@ -1588,25 +1586,6 @@ async function pollMugFaction(fdoc, now) {
         moneyMugged: ps.moneymugged || 0,
         scanned,
       };
-
-      // Open-bazaar detection (v2, main key) — only for attackable targets,
-      // since that's when unbanked bazaar sales are muggable.
-      if ((st.state || "") === "Okay") {
-        try {
-          const br = await fetch(`https://api.torn.com/v2/market/${id}/bazaar?key=${apiKey}`);
-          const bd = await br.json();
-          if (!bzLogged) { console.log(`mug: bazaar probe ${id}: ${JSON.stringify(bd).slice(0, 300)}`); bzLogged = true; }
-          if (bd && bd.error) {
-            if (bd.error.code === 16) bazaarNoAccess = true;
-          } else {
-            const items = Array.isArray(bd.bazaar) ? bd.bazaar : (Array.isArray(bd) ? bd : null);
-            if (items) {
-              out[id].bazaarItems = items.length;
-              out[id].bazaarValue = items.reduce((s, it) => s + ((it.price || 0) * (it.quantity || 0)), 0);
-            }
-          }
-        } catch (e) { /* non-fatal */ }
-      }
     } catch (e) {
       out[id] = { id, name: id, error: "fetch failed", scanned };
     }
@@ -1636,7 +1615,6 @@ async function pollMugFaction(fdoc, now) {
     targets: out,
     scouterEnabled: !!scouterKey,
     scanFactionNames,
-    bazaarNoAccess,
     lastPoll: now,
   });
   console.log(`mug: polled ${Object.keys(out).length} (scans:${scanFactionNames.join(",") || "none"}) faction ${fdoc.id}`);
