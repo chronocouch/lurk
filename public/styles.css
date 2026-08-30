@@ -1466,16 +1466,24 @@ input[type="text"] { width:140px; }
    ═══════════════════════════════════════════════════════════ */
 .mug-list { display:flex; flex-direction:column; gap:8px; }
 .mug-row {
-  display:grid; grid-template-columns:minmax(150px,1.3fr) minmax(0,1.7fr) minmax(120px,auto) auto;
+  display:grid; grid-template-columns:minmax(150px,1.4fr) 78px minmax(0,1.2fr) auto;
   align-items:center; gap:14px; padding:12px 14px;
   background:var(--surface); border:1px solid var(--border);
   border-left:3px solid var(--border-light); border-radius:10px;
 }
-.mug-row.ready-prime { border-left-color:var(--active); }
-.mug-row.ready-soft { border-left-color:var(--awake); }
-.mug-row.ready-active { border-left-color:var(--accent); }
-.mug-row.ready-toostrong { border-left-color:var(--danger); }
-.mug-row.ready-unavailable, .mug-row.ready-stale, .mug-row.ready-pending, .mug-row.ready-error { border-left-color:var(--text-muted); }
+.mug-row.score-prime { border-left-color:var(--active); }
+.mug-row.score-good { border-left-color:var(--accent); }
+.mug-row.score-fair { border-left-color:var(--awake); }
+.mug-row.score-low, .mug-row.score-skip, .mug-row.score-pending { border-left-color:var(--text-muted); }
+/* Score cell — the headline */
+.mug-scorecell { display:flex; flex-direction:column; align-items:center; gap:1px; }
+.mug-score-num { font-size:19px; font-weight:700; white-space:nowrap; line-height:1.1; color:var(--text-dim); }
+.mug-score-num.prime { color:var(--active); }
+.mug-score-num.good { color:var(--accent); }
+.mug-score-num.fair { color:var(--awake); }
+.mug-score-num.low, .mug-score-num.skip, .mug-score-num.pending { color:var(--text-muted); }
+.mug-score-lbl { font-size:9px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; color:var(--text-muted); }
+.sub-warn { color:var(--danger); }
 .mug-id { display:flex; flex-direction:column; gap:2px; min-width:0; }
 .mug-id a { font-size:14px; font-weight:600; color:var(--text); text-decoration:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .mug-id a:hover { color:var(--accent); }
@@ -1498,7 +1506,10 @@ input[type="text"] { width:140px; }
 .mug-actions .attack-btn:hover { background:rgba(248,113,113,0.25); border-color:var(--danger); }
 
 @media (max-width:640px) {
-  .mug-row { grid-template-columns:1fr; gap:9px; }
+  .mug-row { grid-template-columns:56px 1fr; gap:6px 12px; align-items:start; }
+  .mug-scorecell { grid-column:1; grid-row:1 / span 3; align-self:center; }
+  .mug-id, .mug-badges, .mug-actions { grid-column:2; }
+  .mug-actions { justify-self:start; }
   .mug-actions { justify-self:stretch; justify-content:space-between; }
 }
 

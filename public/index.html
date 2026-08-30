@@ -460,6 +460,7 @@
         <div class="control-group fl-sort-group">
           <label>Sort</label>
           <select id="mug-sort" onchange="mugRender()">
+            <option value="score">Mug score</option>
             <option value="ready">Readiness</option>
             <option value="payday">Payday pileup</option>
             <option value="bazaar">Forgotten bazaars</option>
@@ -597,7 +598,10 @@ const FL_TIMES={"Mexico":1560,"Canada":2220,"Cayman Islands":3420,"Hawaii":7260,
 const FL_METHOD_MULT={standard:1,airstrip:0.70,wlt:0.50};
 // ─── Mug watchlist state ───
 let mugTargets=[],mugStatus={},mugScouterEnabled=false,mugLastPoll=0,mugUnsubConfig=null,mugUnsubStatus=null,mugAlertId=null,mugScanFactions=[],mugScanFactionNames=[],mugIgnored=[],mugMinMug=0,mugBazaarItems=[],mugBazaarNoAccess=false,mugScanCompanies=[],mugScanCompanyInfo=[];
-let MUG_ITEM_NAMES={'206':'Xanax'};let mugNameToId={};
+let MUG_ITEM_NAMES={'206':'Xanax'};let mugNameToId={};let mugBazSeeded=false;
+// Drop scanned (non-watched) targets from the local view so removing a scan
+// source clears its results instantly; the next poll repopulates valid ones.
+function mugClearScannedLocal(){const manual=new Set(mugTargets.map(String));for(const id of Object.keys(mugStatus)){const t=mugStatus[id];if(t&&t.scanned&&!manual.has(String(id)))delete mugStatus[id]}}
 
 function showScreen(id){
   ['screen-loading','screen-landing','screen-verify','screen-onboarding','screen-app'].forEach(s=>{
@@ -1241,7 +1245,7 @@ const MUG_RANK={prime:0,soft:1,active:2,toostrong:3,unavailable:4,stale:5,error:
 function initMug(){
   if(!firebaseReady||!userFactionId)return;
   if(mugUnsubConfig)mugUnsubConfig();if(mugUnsubStatus)mugUnsubStatus();
-  mugUnsubConfig=_fb.onSnapshot(_fb.doc(db,'factions/'+userFactionId+'/mug_watchlist','config'),s=>{const d=s.exists()?s.data():{};mugTargets=Array.isArray(d.targets)?d.targets:[];mugScanFactions=Array.isArray(d.scanFactions)?d.scanFactions.map(String):(d.scanFaction?[String(d.scanFaction)]:[]);mugIgnored=Array.isArray(d.ignored)?d.ignored.map(String):[];mugBazaarItems=Array.isArray(d.bazaarItems)?d.bazaarItems.map(String):[];mugScanCompanies=Array.isArray(d.scanCompanies)?d.scanCompanies.map(String):[];mugRender()});
+  mugUnsubConfig=_fb.onSnapshot(_fb.doc(db,'factions/'+userFactionId+'/mug_watchlist','config'),s=>{const d=s.exists()?s.data():{};mugTargets=Array.isArray(d.targets)?d.targets:[];mugScanFactions=Array.isArray(d.scanFactions)?d.scanFactions.map(String):(d.scanFaction?[String(d.scanFaction)]:[]);mugIgnored=Array.isArray(d.ignored)?d.ignored.map(String):[];mugBazaarItems=Array.isArray(d.bazaarItems)?d.bazaarItems.map(String):[];mugScanCompanies=Array.isArray(d.scanCompanies)?d.scanCompanies.map(String):[];if(s.exists()&&!mugBazaarItems.length&&!mugBazSeeded){mugBazSeeded=true;mugBazaarItems=['206'];mugPersist()}mugRender()});
   try{mugMinMug=parseInt(localStorage.getItem('mug_min'))||0}catch(e){}
   mugUnsubStatus=_fb.onSnapshot(_fb.doc(db,'factions/'+userFactionId+'/mug_watchlist','status'),s=>{if(s.exists()){const d=s.data();mugStatus=d.targets||{};mugScouterEnabled=!!d.scouterEnabled;mugScanFactionNames=Array.isArray(d.scanFactionNames)?d.scanFactionNames:(d.scanFactionName?[d.scanFactionName]:[]);mugScanCompanyInfo=Array.isArray(d.scanCompanyInfo)?d.scanCompanyInfo:[];mugBazaarNoAccess=!!d.bazaarNoAccess;mugLastPoll=d.lastPoll||0}mugRender()});
   if(!window._mugTicker)window._mugTicker=setInterval(()=>{if(document.getElementById('tab-mug')&&document.getElementById('tab-mug').classList.contains('active'))mugRender()},20000);
@@ -1276,7 +1280,7 @@ window.mugSetScan=function(){
   if(!mugScanFactions.map(String).includes(String(id)))mugScanFactions.push(parseInt(id));
   inp.value='';mugRender();mugPersist();
 };
-window.mugClearScan=function(id){mugScanFactions=mugScanFactions.filter(f=>String(f)!==String(id));mugRender();mugPersist()};
+window.mugClearScan=function(id){mugScanFactions=mugScanFactions.filter(f=>String(f)!==String(id));mugClearScannedLocal();mugRender();mugPersist()};
 window.mugSetScanCompany=function(){
   const inp=document.getElementById('mug-company-input');const raw=(inp.value||'').trim();
   let id=null;const m=raw.match(/ID=(\d+)/i);if(m)id=m[1];else if(/^\d+$/.test(raw))id=raw;
@@ -1284,7 +1288,7 @@ window.mugSetScanCompany=function(){
   if(!mugScanCompanies.map(String).includes(String(id)))mugScanCompanies.push(parseInt(id));
   inp.value='';mugRender();mugPersist();
 };
-window.mugClearScanCompany=function(id){mugScanCompanies=mugScanCompanies.filter(c=>String(c)!==String(id));mugRender();mugPersist()};
+window.mugClearScanCompany=function(id){mugScanCompanies=mugScanCompanies.filter(c=>String(c)!==String(id));mugClearScannedLocal();mugRender();mugPersist()};
 window.mugScanTheirCompany=function(cid){cid=String(cid);if(cid&&cid!=='0'&&!mugScanCompanies.map(String).includes(cid)){mugScanCompanies.push(parseInt(cid));mugRender();mugPersist()}};
 window.mugAddBazaarItem=function(){
   const inp=document.getElementById('mug-baz-input');const raw=(inp.value||'').trim();if(!raw)return;
@@ -1296,7 +1300,7 @@ window.mugAddBazaarItem=function(){
   if(!mugBazaarItems.map(String).includes(String(id)))mugBazaarItems.push(parseInt(id));
   inp.value='';mugRender();mugPersist();
 };
-window.mugRemoveBazaarItem=function(id){mugBazaarItems=mugBazaarItems.filter(i=>String(i)!==String(id));mugRender();mugPersist()};
+window.mugRemoveBazaarItem=function(id){mugBazaarItems=mugBazaarItems.filter(i=>String(i)!==String(id));mugClearScannedLocal();mugRender();mugPersist()};
 // "Forgotten bazaar" score: open bazaar × weekly-customer volume × idle hours,
 // capped. Active owners (Online / just acted) fall to ~0.
 function mugBazScore(t,now){
@@ -1369,38 +1373,81 @@ function mugArchetype(t){
   return null;
 }
 function mugGrinderScore(t){const lm=(t.largestMug||0)/1e6||1,mm=t.moneyMugged||0;return (mm/lm)*(t.job?1.5:1)}
+// ── Composite mug score (0–100) — the headline signal ──
+// Beatability is a multiplier (unbeatable tanks it); stacked paydays + an
+// untouched pile drive the value; everything else nudges. Not-attackable is
+// heavily discounted. Tooltip (mugScoreWhy) explains the number.
+function mugScore(t,now){
+  if(t.pending||t.error)return null;
+  const ff=t.fairFight;
+  let beat; // beat/stealth multiplier
+  if(ff==null)beat=0.6; else if(ff<2.5)beat=1.0; else if(ff<3)beat=0.9; else if(ff<3.7)beat=0.7; else if(ff<5)beat=0.3; else beat=0.05;
+  let v=0;
+  const pd=mugPaydayCount(t,now);
+  if(t.job)v+=Math.min(pd,5)*9;                                  // stacked paydays — the big driver
+  const watched=(t.expSamples||0)>=4;
+  if(watched&&!t.lastMuggedTs)v+=18;                             // pile intact
+  else if(t.lastMuggedTs&&(now-t.lastMuggedTs)<86400)v-=12;      // mugged today
+  if(t.largestMug)v+=Math.min(t.largestMug/1e6,10)*1.2;          // proven carrier
+  if(t.networth)v+=Math.max(0,Math.min(2,Math.log10(t.networth+1)-8))*4; // wealth prior
+  if(t.bazaarOpen&&t.weeklyCustomers)v+=Math.min(t.weeklyCustomers/2000,1)*10; // open bazaar
+  if(t.exposure!=null){if(t.exposure>0.5)v+=4;else if(t.exposure<0.2)v-=6;}    // exposure
+  v=Math.max(0,Math.min(100,v));
+  const s=v*beat*(t.state==='Okay'?1:0.3);
+  return Math.round(Math.max(0,Math.min(100,s)));
+}
+function mugScoreTier(s){
+  if(s==null)return{cls:'pending',icon:'·',label:'—'};
+  if(s>=70)return{cls:'prime',icon:'🔥',label:'Prime'};
+  if(s>=45)return{cls:'good',icon:'🎯',label:'Good'};
+  if(s>=25)return{cls:'fair',icon:'◑',label:'Fair'};
+  if(s>=10)return{cls:'low',icon:'○',label:'Low'};
+  return{cls:'skip',icon:'·',label:'Skip'};
+}
+function mugScoreWhy(t,now){
+  const p=[];const ff=t.fairFight;
+  if(ff==null)p.push('Beatability unknown — add FF key');
+  else if(ff>=5)p.push('⚠ Likely can’t beat / stealth (FF '+ff.toFixed(1)+')');
+  else if(ff>=3.7)p.push('Tough, may be seen (FF '+ff.toFixed(1)+')');
+  else if(ff<2.5)p.push('Easy + stealthable (FF '+ff.toFixed(1)+')');
+  else p.push('Winnable (FF '+ff.toFixed(1)+')');
+  const pd=mugPaydayCount(t,now);
+  if(t.job&&pd>=1)p.push(pd+' payday'+(pd>1?'s':'')+' stacked');
+  if((t.expSamples||0)>=4&&!t.lastMuggedTs)p.push('No mug seen — pile likely intact');
+  else if(t.lastMuggedTs&&(now-t.lastMuggedTs)<86400)p.push('Mugged '+timeAgo(t.lastMuggedTs));
+  if(t.largestMug)p.push('Carrier — biggest mug '+flMoney(t.largestMug));
+  if(t.bazaarOpen)p.push('Open bazaar '+wbNum(t.weeklyCustomers||0)+'/wk');
+  if(t.networth)p.push('Net worth '+flMoney(t.networth));
+  if(t.exposure!=null)p.push('Attackable '+Math.round(t.exposure*100)+'% of the time');
+  if(t.state!=='Okay')p.push('⚠ Not attackable now ('+t.state+')');
+  return p.join(' · ');
+}
 function mugRowHtml(t,r,now){
   const isManual=mugTargets.map(String).includes(String(t.id));
   const rm=isManual
     ?`<button class="mug-remove" onclick="mugRemove('${t.id}')" title="Remove from watchlist">✕</button>`
     :`<button class="mug-watch" onclick="mugWatch('${t.id}')" title="Add to watchlist">+ Watch</button><button class="mug-ignore-btn" onclick="mugIgnore('${t.id}')" title="Ignore — don't show this player again">🚫</button>`;
   const prof=`https://www.torn.com/profiles.php?XID=${t.id}`;
-  if(t.pending)return `<div class="mug-row ready-pending" data-mug-id="${t.id}"><div class="mug-id"><a href="${prof}" target="_blank" rel="noopener">${t.id}</a><span class="mug-meta">loading…</span></div><div class="mug-badges"><span class="mug-ready-badge ready-pending">· pending — first poll within ~5 min</span></div><div class="mug-actions">${rm}</div></div>`;
-  if(t.error)return `<div class="mug-row ready-error" data-mug-id="${t.id}"><div class="mug-id"><a href="${prof}" target="_blank" rel="noopener">${t.name}</a><span class="mug-meta">API error</span></div><div class="mug-badges"><span class="mug-ready-badge ready-error">⚠ ${t.error}</span></div><div class="mug-actions">${rm}</div></div>`;
-  const READY=MUG_READY[r.tier]||MUG_READY.soft;
+  if(t.pending)return `<div class="mug-row score-pending" data-mug-id="${t.id}"><div class="mug-id"><a href="${prof}" target="_blank" rel="noopener">${t.id}</a><span class="mug-meta">loading… (first poll within ~5 min)</span></div><div class="mug-scorecell"><span class="mug-score-num pending">·</span></div><div class="mug-badges"></div><div class="mug-actions">${rm}</div></div>`;
+  if(t.error)return `<div class="mug-row score-skip" data-mug-id="${t.id}"><div class="mug-id"><a href="${prof}" target="_blank" rel="noopener">${t.name}</a><span class="mug-meta sub-warn">⚠ ${t.error}</span></div><div class="mug-scorecell"><span class="mug-score-num skip">⚠</span></div><div class="mug-badges"></div><div class="mug-actions">${rm}</div></div>`;
   const attackable=t.state==='Okay';
   const stateLabel={Okay:'Okay',Hospital:'Hospital',Traveling:'Traveling',Abroad:'Abroad',Jail:'Jail'}[t.state]||t.state||'?';
   const stateCls={Okay:'chip-okay',Hospital:'chip-hospital',Traveling:'chip-traveling',Abroad:'chip-abroad',Jail:'chip-jail'}[t.state]||'chip-unknown';
+  const sc=mugScore(t,now),tier=mugScoreTier(sc);
   let sub;
-  if(r.tier==='unavailable')sub=stateLabel+(r.secs?' · avail in '+formatCountdown(r.secs):'');
-  else if(r.tier==='active')sub='at keyboard now — may bank/retaliate';
-  else if(r.tier==='toostrong')sub='you likely can’t beat or stealth';
-  else sub='last action '+(t.lastActionTs?timeAgo(t.lastActionTs):'—');
-  return `<div class="mug-row ready-${r.tier}" data-mug-id="${t.id}">
-    <div class="mug-id"><a href="${prof}" target="_blank" rel="noopener">${t.name}</a><span class="mug-meta">Lvl ${t.level||'?'}${t.job?' · '+t.job:''}</span></div>
+  if(!attackable){const secs=t.statusUntil&&t.statusUntil>now?t.statusUntil-now:null;sub=`<span class="sub-warn">${stateLabel}${secs?' · in '+formatCountdown(secs):''}</span>`}
+  else if(t.lastActionStatus==='Online')sub='<span class="sub-warn">at keyboard now</span>';
+  else sub='idle '+(t.lastActionTs?timeAgo(t.lastActionTs).replace(' ago',''):'—');
+  const pd=mugPaydayCount(t,now);const clean=(t.expSamples||0)>=4&&!t.lastMuggedTs;
+  return `<div class="mug-row score-${tier.cls}" data-mug-id="${t.id}">
+    <div class="mug-id"><a href="${prof}" target="_blank" rel="noopener">${t.name}</a><span class="mug-meta">Lvl ${t.level||'?'}${t.job?' · '+t.job:''}</span><span class="mug-sub">${sub}</span></div>
+    <div class="mug-scorecell" title="Mug score ${sc} — ${mugScoreWhy(t,now).replace(/"/g,'&quot;')}"><span class="mug-score-num ${tier.cls}">${tier.icon} ${sc}</span><span class="mug-score-lbl">${tier.label}</span></div>
     <div class="mug-badges">
       <span class="status-chip ${stateCls}"><span class="dot"></span>${stateLabel}</span>
-      ${mugFFBadge(t)}
-      ${(()=>{const c=mugCatch(t);return `<span class="wb-catch ${c.cls}" title="${(c.tip||'').replace(/"/g,'&quot;')}">${c.icon} ${c.label}</span>`})()}
-      <span class="mug-money" title="Biggest single mug ever taken off them · net worth">💰 ${flMoney(t.largestMug||0)}<span class="mug-net"> · net ${flMoney(t.networth||0)}</span></span>
-      ${t.bazaarOpen?`<span class="mug-baz" title="Open bazaar${t.bazaarName?' — '+t.bazaarName:''} · ${(t.weeklyCustomers||0).toLocaleString()} customers/week">🏪 open · ${wbNum(t.weeklyCustomers||0)}/wk</span>`:''}
-      ${(t.job&&t.state==='Okay'&&mugPaydayCount(t,now)>=1)?(()=>{const p=mugPaydayCount(t,now);const watched=(t.expSamples||0)>=4;const clean=watched&&!t.lastMuggedTs;const mugTxt=t.lastMuggedTs?' · last mugged '+timeAgo(t.lastMuggedTs):(watched?' · no mug seen — pile likely intact':'');return `<span class="mug-payday${clean?' clean':''}" title="Salaried — paid daily at 18:00 TCT, unbanked while idle. ${p} payday${p>1?'s':''} stacked${mugTxt}.">💵 ~${p} payday${p>1?'s':''}${clean?' · clean':''}</span>`})():''}
-      ${(()=>{const a=mugArchetype(t);return a?`<span class="mug-arch arch-${a.cls}" title="${a.title}">${a.icon} ${a.label}</span>`:''})()}
-      ${(t.scanned&&!isManual)?'<span class="mug-scanned-tag" title="Found by faction scan — not on your watchlist">scanned</span>':''}
-    </div>
-    <div class="mug-ready">
-      <span class="mug-ready-badge ready-${r.tier}">${READY.icon} ${READY.label}</span>
-      <span class="mug-sub">${sub}</span>
+      ${(t.job&&attackable&&pd>=1)?`<span class="mug-payday${clean?' clean':''}" title="Salaried — daily pay at 18:00 TCT, unbanked while idle. ${pd} payday${pd>1?'s':''} stacked${clean?', no mug seen':t.lastMuggedTs?', last mugged '+timeAgo(t.lastMuggedTs):''}.">💵 ${pd} payday${pd>1?'s':''}${clean?' · clean':''}</span>`:''}
+      ${t.largestMug?`<span class="mug-money" title="Biggest single mug ever taken off them">💰 ${flMoney(t.largestMug)}</span>`:''}
+      ${t.bazaarOpen?`<span class="mug-baz" title="${t.bazaarName?t.bazaarName+' · ':''}${(t.weeklyCustomers||0).toLocaleString()} customers/week">🏪 ${wbNum(t.weeklyCustomers||0)}/wk</span>`:''}
+      ${(t.scanned&&!isManual)?'<span class="mug-scanned-tag" title="From a scan — not on your watchlist. Tap + Watch to keep.">scanned</span>':''}
     </div>
     <div class="mug-actions">${attackable?`<a class="attack-btn attackable" href="https://www.torn.com/loader.php?sid=attack&user2ID=${t.id}" target="_blank" rel="noopener">⚔ Mug</a>`:''}${t.companyId?(()=>{const hi=(t.coRating||0)>=8;const info=t.coName?`${t.coName}${t.coIncome?' · '+flMoney(t.coIncome)+'/wk':''}${t.coRating?' · '+t.coRating+'★':''}`:'their company';return `<button class="mug-co-btn${hi?' high':''}" onclick="mugScanTheirCompany('${t.companyId}')" title="Scan ${info.replace(/"/g,'&quot;')} for more idle job-holders${hi?' — high-value roster!':''}">🏢${hi?' ★':''}</button>`})():''}${rm}</div>
   </div>`;
@@ -1454,15 +1501,17 @@ function mugRender(){
     if(sort==='grinder')return mugGrinderScore(b.t)-mugGrinderScore(a.t);
     if(sort==='networth')return(b.t.networth||0)-(a.t.networth||0);
     if(sort==='ff'){const av=a.t.fairFight!=null?a.t.fairFight:Infinity,bv=b.t.fairFight!=null?b.t.fairFight:Infinity;return av-bv}
-    return(MUG_RANK[a.r.tier]??9)-(MUG_RANK[b.r.tier]??9)||(b.t.largestMug||0)-(a.t.largestMug||0);
+    if(sort==='ready')return(MUG_RANK[a.r.tier]??9)-(MUG_RANK[b.r.tier]??9)||(b.t.largestMug||0)-(a.t.largestMug||0);
+    return (mugScore(b.t,now)||0)-(mugScore(a.t,now)||0); // default: mug score
   });
   list.innerHTML=rows.map(x=>mugRowHtml(x.t,x.r,now)).join('');
-  const prime=rows.filter(x=>x.r.tier==='prime').sort((a,b)=>(b.t.largestMug||0)-(a.t.largestMug||0))[0];
+  // Alert: the best currently-attackable target scoring Good+ (≥45).
+  const top=rows.map(x=>({x,sc:mugScore(x.t,now)})).filter(o=>o.sc!=null&&o.sc>=45&&o.x.t.state==='Okay').sort((a,b)=>b.sc-a.sc)[0];
   const bar=document.getElementById('mug-alert-bar');
-  if(prime){mugAlertId=prime.id;document.getElementById('mug-alert-text').textContent=`${prime.t.name} — soft window · last action ${timeAgo(prime.t.lastActionTs)} · biggest mug ${flMoney(prime.t.largestMug||0)}`;bar.classList.add('visible')}
+  if(top){mugAlertId=top.x.id;const t=top.x.t,tier=mugScoreTier(top.sc);const pd=mugPaydayCount(t,now);document.getElementById('mug-alert-text').textContent=`${t.name} — ${tier.label} target (${top.sc})${t.job&&pd?' · '+pd+' payday'+(pd>1?'s':''):''}${t.largestMug?' · carries '+flMoney(t.largestMug):''}`;bar.classList.add('visible')}
   else{mugAlertId=null;bar.classList.remove('visible')}
-  let dis='Proxy signals only — carried cash is hidden by Torn. "Biggest mug" = the most cash ever mugged off them (proven carrier); FF covers both beatability and stealth / retaliation risk.';
-  if(!mugScouterEnabled)dis+=' Add an FF Scouter key in Settings to score beatability & stealth.';
+  let dis='Mug score (0–100): beatable/stealthable × stacked-payday & untouched-pile value, discounted if not attackable. Hover a score for the breakdown. Carried cash is hidden by Torn, so it\'s a probabilistic edge.';
+  if(!mugScouterEnabled)dis+=' Add an FF Scouter key in Settings so beatability/stealth counts.';
   document.getElementById('mug-disclaimer').textContent=dis;
 }
 
