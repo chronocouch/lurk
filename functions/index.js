@@ -1661,6 +1661,34 @@ async function pollMugFaction(fdoc, now) {
     }
   }
 
+  // ── Exposure tracking (mug "catchability") ──
+  // How often is each target actually attackable ("Okay") vs protecting
+  // themselves (hospital/travel/jail)? Same self-protection tactics as war
+  // bagging — a disciplined warrior is rarely muggable even with cash out.
+  try {
+    const tgDoc = await fdoc.ref.collection("mug_watchlist").doc("targeting").get();
+    const tg = tgDoc.exists ? tgDoc.data().t || {} : {};
+    const PROTECTED = ["Hospital", "Traveling", "Abroad", "Jail"];
+    for (const id of Object.keys(out)) {
+      const o = out[id];
+      if (o.error) continue;
+      const s = tg[id] || { polls: 0, okay: 0, afkOkay: 0, prot: 0 };
+      s.polls++;
+      if (o.state === "Okay") { s.okay++; if (o.lastActionStatus !== "Online") s.afkOkay++; }
+      else if (PROTECTED.includes(o.state)) s.prot++;
+      s.lastSeen = now;
+      tg[id] = s;
+      o.exposure = s.polls >= 4 ? Math.round((s.okay / s.polls) * 100) / 100 : null;
+      o.afkExposure = s.okay >= 3 ? Math.round((s.afkOkay / s.okay) * 100) / 100 : null;
+      o.expSamples = s.polls;
+    }
+    // Prune targets not seen in 7 days.
+    for (const id of Object.keys(tg)) {
+      if (tg[id].lastSeen && now - tg[id].lastSeen > 7 * 86400) delete tg[id];
+    }
+    await fdoc.ref.collection("mug_watchlist").doc("targeting").set({ t: tg, lastUpdated: now });
+  } catch (e) { console.error("mug: exposure tracking failed:", e); }
+
   await fdoc.ref.collection("mug_watchlist").doc("status").set({
     targets: out,
     scouterEnabled: !!scouterKey,

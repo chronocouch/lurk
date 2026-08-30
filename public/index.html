@@ -1282,6 +1282,19 @@ function mugBazScore(t,now){
   const idleH=t.lastActionTs?Math.min(24,(now-t.lastActionTs)/3600):0;
   return t.weeklyCustomers*idleH;
 }
+// Mug catchability: how often are they actually attackable vs protecting
+// themselves (hospital/travel)? Same idea as war bagging discipline.
+function mugCatch(t){
+  if(t.exposure==null)return{cls:'unknown',label:'catch: building',icon:'🕵',tip:'Building history — needs a few polls'};
+  const exp=t.exposure,afk=t.afkExposure||0;
+  const live=t.lastActionStatus==='Offline'?1:t.lastActionStatus==='Idle'?0.5:0;
+  const pct=Math.round(exp*100),afkPct=Math.round(afk*100);
+  if(exp<0.2)return{cls:'bagger',label:'well-protected',icon:'🛡',tip:'Attackable only '+pct+'% of the time — stays hospitalized/traveling'};
+  const score=exp*0.5+afk*0.3+live*0.2;
+  const tier=score>=0.55?{cls:'high',label:'often exposed',icon:'🎯'}:score>=0.3?{cls:'med',label:'sometimes open',icon:'◑'}:{cls:'low',label:'usually protected',icon:'○'};
+  tier.tip='Attackable '+pct+'% of the time'+(afk?' · AFK when open '+afkPct+'%':'');
+  return tier;
+}
 window.mugScrollToAlert=function(){if(!mugAlertId)return;const r=document.querySelector('.mug-row[data-mug-id="'+mugAlertId+'"]');if(r)r.scrollIntoView({behavior:'smooth',block:'center'})};
 
 function mugReadiness(t,now){
@@ -1338,6 +1351,7 @@ function mugRowHtml(t,r,now){
     <div class="mug-badges">
       <span class="status-chip ${stateCls}"><span class="dot"></span>${stateLabel}</span>
       ${mugFFBadge(t)}
+      ${(()=>{const c=mugCatch(t);return `<span class="wb-catch ${c.cls}" title="${(c.tip||'').replace(/"/g,'&quot;')}">${c.icon} ${c.label}</span>`})()}
       <span class="mug-money" title="Biggest single mug ever taken off them · net worth">💰 ${flMoney(t.largestMug||0)}<span class="mug-net"> · net ${flMoney(t.networth||0)}</span></span>
       ${t.bazaarOpen?`<span class="mug-baz" title="Open bazaar${t.bazaarName?' — '+t.bazaarName:''} · ${(t.weeklyCustomers||0).toLocaleString()} customers/week">🏪 open · ${wbNum(t.weeklyCustomers||0)}/wk</span>`:''}
       ${(()=>{const a=mugArchetype(t);return a?`<span class="mug-arch arch-${a.cls}" title="${a.title}">${a.icon} ${a.label}</span>`:''})()}
