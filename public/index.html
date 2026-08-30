@@ -446,16 +446,20 @@
       <div class="fl-board-controls">
         <input type="text" id="mug-add-input" class="fl-search" placeholder="Add player ID or profile URL…" autocomplete="off" onkeydown="if(event.key==='Enter')mugAdd()">
         <button class="btn btn-secondary" onclick="mugAdd()">Add target</button>
+        <input type="text" id="mug-scan-input" class="fl-search" placeholder="Scan a faction ID for soft members…" autocomplete="off" onkeydown="if(event.key==='Enter')mugSetScan()">
+        <button class="btn btn-secondary" onclick="mugSetScan()">Scan faction</button>
         <div class="control-group fl-sort-group">
           <label>Sort</label>
           <select id="mug-sort" onchange="mugRender()">
             <option value="ready">Readiness</option>
-            <option value="mug">Biggest mug</option>
+            <option value="mug">Biggest mug (jackpot)</option>
+            <option value="grinder">Steady earners</option>
             <option value="networth">Net worth</option>
             <option value="ff">Easiest (FF)</option>
           </select>
         </div>
       </div>
+      <div class="mug-scan-active" id="mug-scan-active" style="display:none"></div>
 
       <!-- Sticky soft-window alert -->
       <div class="imminent-bar" id="mug-alert-bar" onclick="mugScrollToAlert()">
@@ -579,7 +583,7 @@ let flBoard={},flBoardMeta={},flItems={},flFlow={},flUnsubBoard=null,flUnsubItem
 const FL_TIMES={"Mexico":1560,"Canada":2220,"Cayman Islands":3420,"Hawaii":7260,"United Kingdom":9120,"Switzerland":10140,"Argentina":11340,"Japan":12180,"China":13140,"UAE":15540,"South Africa":18660};
 const FL_METHOD_MULT={standard:1,airstrip:0.70,wlt:0.50};
 // ─── Mug watchlist state ───
-let mugTargets=[],mugStatus={},mugScouterEnabled=false,mugLastPoll=0,mugUnsubConfig=null,mugUnsubStatus=null,mugAlertId=null;
+let mugTargets=[],mugStatus={},mugScouterEnabled=false,mugLastPoll=0,mugUnsubConfig=null,mugUnsubStatus=null,mugAlertId=null,mugScanFaction=null,mugScanFactionName='';
 
 function showScreen(id){
   ['screen-loading','screen-landing','screen-verify','screen-onboarding','screen-app'].forEach(s=>{
@@ -1214,13 +1218,13 @@ const MUG_RANK={prime:0,soft:1,active:2,toostrong:3,unavailable:4,stale:5,error:
 function initMug(){
   if(!firebaseReady||!userFactionId)return;
   if(mugUnsubConfig)mugUnsubConfig();if(mugUnsubStatus)mugUnsubStatus();
-  mugUnsubConfig=_fb.onSnapshot(_fb.doc(db,'factions/'+userFactionId+'/mug_watchlist','config'),s=>{mugTargets=(s.exists()&&Array.isArray(s.data().targets))?s.data().targets:[];mugRender()});
-  mugUnsubStatus=_fb.onSnapshot(_fb.doc(db,'factions/'+userFactionId+'/mug_watchlist','status'),s=>{if(s.exists()){const d=s.data();mugStatus=d.targets||{};mugScouterEnabled=!!d.scouterEnabled;mugLastPoll=d.lastPoll||0}mugRender()});
+  mugUnsubConfig=_fb.onSnapshot(_fb.doc(db,'factions/'+userFactionId+'/mug_watchlist','config'),s=>{const d=s.exists()?s.data():{};mugTargets=Array.isArray(d.targets)?d.targets:[];mugScanFaction=d.scanFaction?String(d.scanFaction):null;mugRender()});
+  mugUnsubStatus=_fb.onSnapshot(_fb.doc(db,'factions/'+userFactionId+'/mug_watchlist','status'),s=>{if(s.exists()){const d=s.data();mugStatus=d.targets||{};mugScouterEnabled=!!d.scouterEnabled;mugScanFactionName=d.scanFactionName||'';mugLastPoll=d.lastPoll||0}mugRender()});
   if(!window._mugTicker)window._mugTicker=setInterval(()=>{if(document.getElementById('tab-mug')&&document.getElementById('tab-mug').classList.contains('active'))mugRender()},20000);
 }
 async function mugPersist(){
   if(!firebaseReady||!userFactionId)return;
-  try{await _fb.setDoc(_fb.doc(db,'factions/'+userFactionId+'/mug_watchlist','config'),{targets:mugTargets,active:true,updatedAt:Math.floor(Date.now()/1000)})}
+  try{await _fb.setDoc(_fb.doc(db,'factions/'+userFactionId+'/mug_watchlist','config'),{targets:mugTargets,scanFaction:mugScanFaction?parseInt(mugScanFaction):null,active:true,updatedAt:Math.floor(Date.now()/1000)})}
   catch(e){console.error('mug config save failed',e)}
 }
 window.mugAdd=function(){
@@ -1231,6 +1235,14 @@ window.mugAdd=function(){
   mugTargets.push(parseInt(id));inp.value='';mugRender();mugPersist();
 };
 window.mugRemove=function(id){mugTargets=mugTargets.filter(t=>String(t)!==String(id));mugRender();mugPersist()};
+window.mugWatch=function(id){id=String(id);if(!mugTargets.map(String).includes(id)){mugTargets.push(parseInt(id));mugRender();mugPersist()}};
+window.mugSetScan=function(){
+  const inp=document.getElementById('mug-scan-input');const raw=(inp.value||'').trim();
+  let id=null;const m=raw.match(/factions\.php\?step=profile&ID=(\d+)|ID=(\d+)/i);if(m)id=m[1]||m[2];else if(/^\d+$/.test(raw))id=raw;
+  if(!id){alert('Enter a numeric faction ID.');return}
+  mugScanFaction=String(id);inp.value='';mugRender();mugPersist();
+};
+window.mugClearScan=function(){mugScanFaction=null;mugScanFactionName='';mugRender();mugPersist()};
 window.mugScrollToAlert=function(){if(!mugAlertId)return;const r=document.querySelector('.mug-row[data-mug-id="'+mugAlertId+'"]');if(r)r.scrollIntoView({behavior:'smooth',block:'center'})};
 
 function mugReadiness(t,now){
@@ -1255,8 +1267,21 @@ function mugFFBadge(t){
   const ff=t.fairFight!=null?'FF '+t.fairFight.toFixed(1):'';
   return `<span class="wb-stat ff-${band.cls}" title="Beatability + stealth read">🎯 ${ff} · ${band.label}${stealth?' · '+stealth:''}</span>`;
 }
+// Target archetype from public stats: jackpot (big single mugs + wealth) vs
+// grinder (many smaller mugs + a job) vs balanced.
+function mugArchetype(t){
+  const lm=t.largestMug||0,nw=t.networth||0,mm=t.moneyMugged||0;
+  if(lm>=5e6&&nw>=1e9)return{cls:'jackpot',icon:'🎰',label:'Jackpot',title:'High roller — big single mugs (but likely more careful)'};
+  if(lm>0&&mm/lm>=4&&t.job)return{cls:'grinder',icon:'🐢',label:'Grinder',title:'Steady earner — many smaller mugs'};
+  if(lm>0||mm>0)return{cls:'balanced',icon:'⚖',label:'Balanced',title:'Mixed mug history'};
+  return null;
+}
+function mugGrinderScore(t){const lm=(t.largestMug||0)/1e6||1,mm=t.moneyMugged||0;return (mm/lm)*(t.job?1.5:1)}
 function mugRowHtml(t,r,now){
-  const rm=`<button class="mug-remove" onclick="mugRemove('${t.id}')" title="Remove">✕</button>`;
+  const isManual=mugTargets.map(String).includes(String(t.id));
+  const rm=isManual
+    ?`<button class="mug-remove" onclick="mugRemove('${t.id}')" title="Remove from watchlist">✕</button>`
+    :`<button class="mug-watch" onclick="mugWatch('${t.id}')" title="Add to watchlist">+ Watch</button>`;
   const prof=`https://www.torn.com/profiles.php?XID=${t.id}`;
   if(t.pending)return `<div class="mug-row ready-pending" data-mug-id="${t.id}"><div class="mug-id"><a href="${prof}" target="_blank" rel="noopener">${t.id}</a><span class="mug-meta">loading…</span></div><div class="mug-badges"><span class="mug-ready-badge ready-pending">· pending — first poll within ~5 min</span></div><div class="mug-actions">${rm}</div></div>`;
   if(t.error)return `<div class="mug-row ready-error" data-mug-id="${t.id}"><div class="mug-id"><a href="${prof}" target="_blank" rel="noopener">${t.name}</a><span class="mug-meta">API error</span></div><div class="mug-badges"><span class="mug-ready-badge ready-error">⚠ ${t.error}</span></div><div class="mug-actions">${rm}</div></div>`;
@@ -1275,6 +1300,8 @@ function mugRowHtml(t,r,now){
       <span class="status-chip ${stateCls}"><span class="dot"></span>${stateLabel}</span>
       ${mugFFBadge(t)}
       <span class="mug-money" title="Biggest single mug ever taken off them · net worth">💰 ${flMoney(t.largestMug||0)}<span class="mug-net"> · net ${flMoney(t.networth||0)}</span></span>
+      ${(()=>{const a=mugArchetype(t);return a?`<span class="mug-arch arch-${a.cls}" title="${a.title}">${a.icon} ${a.label}</span>`:''})()}
+      ${(t.scanned&&!isManual)?'<span class="mug-scanned-tag" title="Found by faction scan — not on your watchlist">scanned</span>':''}
     </div>
     <div class="mug-ready">
       <span class="mug-ready-badge ready-${r.tier}">${READY.icon} ${READY.label}</span>
@@ -1286,12 +1313,26 @@ function mugRowHtml(t,r,now){
 function mugRender(){
   const list=document.getElementById('mug-list');if(!list)return;
   const now=Math.floor(Date.now()/1000);
-  document.getElementById('mug-meta-bar').innerHTML=mugTargets.length?`<div class="meta-item">Targets <span class="meta-value">${mugTargets.length}</span></div><div class="meta-item">Updated <span class="meta-value">${mugLastPoll?timeAgo(mugLastPoll):'—'}</span></div>`:'';
-  if(!mugTargets.length){list.innerHTML='<div class="state-banner"><h3>No targets yet</h3><p>Add player IDs of known cash-carriers to watch for soft mug windows.</p></div>';document.getElementById('mug-alert-bar').classList.remove('visible');document.getElementById('mug-disclaimer').textContent='';return}
-  let rows=mugTargets.map(id=>{const t=mugStatus[String(id)]||{id:String(id),name:String(id),pending:true};return{t,r:mugReadiness(t,now),id:String(id)}});
+  // Scan-faction indicator
+  const scanEl=document.getElementById('mug-scan-active');
+  if(mugScanFaction){scanEl.style.display='';scanEl.innerHTML=`Scanning <span class="meta-value">${mugScanFactionName||('faction '+mugScanFaction)}</span> for idle, attackable members <button class="mug-remove" onclick="mugClearScan()" title="Stop scanning">✕</button>`}
+  else scanEl.style.display='none';
+  // Union of manual targets + scanned candidates (from status)
+  const ids=new Set(mugTargets.map(String));
+  Object.keys(mugStatus).forEach(id=>ids.add(String(id)));
+  const nManual=mugTargets.length;
+  document.getElementById('mug-meta-bar').innerHTML=ids.size?`<div class="meta-item">Targets <span class="meta-value">${nManual} watched${ids.size>nManual?' · '+(ids.size-nManual)+' scanned':''}</span></div><div class="meta-item">Updated <span class="meta-value">${mugLastPoll?timeAgo(mugLastPoll):'—'}</span></div>`:'';
+  if(!ids.size){
+    list.innerHTML=mugScanFaction
+      ?'<div class="state-banner"><h3>Scanning…</h3><p>Pulling idle, attackable members. First results within ~5 min.</p></div>'
+      :'<div class="state-banner"><h3>No targets yet</h3><p>Add player IDs of known cash-carriers, or scan a faction for soft members.</p></div>';
+    document.getElementById('mug-alert-bar').classList.remove('visible');document.getElementById('mug-disclaimer').textContent='';return;
+  }
+  let rows=[...ids].map(id=>{const t=mugStatus[id]||{id,name:id,pending:true};return{t,r:mugReadiness(t,now),id}});
   const sort=document.getElementById('mug-sort').value;
   rows.sort((a,b)=>{
     if(sort==='mug')return(b.t.largestMug||0)-(a.t.largestMug||0);
+    if(sort==='grinder')return mugGrinderScore(b.t)-mugGrinderScore(a.t);
     if(sort==='networth')return(b.t.networth||0)-(a.t.networth||0);
     if(sort==='ff'){const av=a.t.fairFight!=null?a.t.fairFight:Infinity,bv=b.t.fairFight!=null?b.t.fairFight:Infinity;return av-bv}
     return(MUG_RANK[a.r.tier]??9)-(MUG_RANK[b.r.tier]??9)||(b.t.largestMug||0)-(a.t.largestMug||0);

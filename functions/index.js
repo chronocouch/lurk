@@ -1537,21 +1537,50 @@ exports.collectMugTargets = onSchedule(
         const plan = await fdoc.ref.collection("mug_watchlist").doc("config").get();
         if (!plan.exists || plan.data().active === false) continue;
         const targets = (plan.data().targets || []).map(String).filter(Boolean);
-        if (targets.length === 0) continue;
+        const scanFaction = plan.data().scanFaction ? String(plan.data().scanFaction) : null;
+        if (targets.length === 0 && !scanFaction) continue;
 
         const cfg = await fdoc.ref.collection("internal").doc("config").get();
         if (!cfg.exists || !cfg.data().active) continue;
         const apiKey = decryptApiKey(cfg.data().apiKey);
         const scouterKey = cfg.data().scouterKey ? decryptApiKey(cfg.data().scouterKey) : null;
 
+        // Build the ID list: manual targets + idle-attackable members of the
+        // scan faction (basic call gives status + last_action, so we filter
+        // cheaply and only deep-poll the promising subset).
+        const idList = [...new Set(targets)];
+        const scannedSet = new Set();
+        let scanFactionName = null;
+        if (scanFaction) {
+          try {
+            const fr = await fetch(`https://api.torn.com/faction/${scanFaction}?selections=basic&key=${apiKey}`);
+            const fd = await fr.json();
+            if (!fd.error && fd.members) {
+              scanFactionName = fd.name || scanFaction;
+              const cands = Object.entries(fd.members)
+                .filter(([, m]) => (m.status && m.status.state) === "Okay" &&
+                  (m.last_action && m.last_action.status) !== "Online")
+                .sort((a, b) => (b[1].last_action?.timestamp || 0) - (a[1].last_action?.timestamp || 0));
+              const cap = Math.max(0, 40 - idList.length);
+              for (const [id] of cands.slice(0, Math.min(25, cap))) {
+                if (!idList.includes(String(id))) { idList.push(String(id)); scannedSet.add(String(id)); }
+              }
+            } else if (fd.error) {
+              console.error(`mug: scan faction ${scanFaction} error:`, fd.error);
+            }
+          } catch (e) { console.error("mug: scan faction fetch failed:", e); }
+        }
+        if (idList.length === 0) continue;
+
         const out = {};
-        for (const id of targets) {
+        for (const id of idList) {
+          const scanned = scannedSet.has(id);
           try {
             const res = await fetch(
               `https://api.torn.com/user/${id}?selections=profile,personalstats&key=${apiKey}`
             );
             const d = await res.json();
-            if (d.error) { out[id] = { id, name: id, error: d.error.error || "error" }; continue; }
+            if (d.error) { out[id] = { id, name: id, error: d.error.error || "error", scanned }; continue; }
             const st = d.status || {};
             const ps = d.personalstats || {};
             const la = d.last_action || {};
@@ -1568,9 +1597,10 @@ exports.collectMugTargets = onSchedule(
               networth: ps.networth || 0,
               largestMug: ps.largestmug || 0,
               moneyMugged: ps.moneymugged || 0,
+              scanned,
             };
           } catch (e) {
-            out[id] = { id, name: id, error: "fetch failed" };
+            out[id] = { id, name: id, error: "fetch failed", scanned };
           }
         }
 
@@ -1600,9 +1630,10 @@ exports.collectMugTargets = onSchedule(
         await fdoc.ref.collection("mug_watchlist").doc("status").set({
           targets: out,
           scouterEnabled: !!scouterKey,
+          scanFactionName: scanFactionName || null,
           lastPoll: now,
         });
-        console.log(`mug: polled ${targets.length} targets for faction ${fdoc.id}`);
+        console.log(`mug: polled ${Object.keys(out).length} targets (scan:${scanFactionName || "none"}) for faction ${fdoc.id}`);
       } catch (e) {
         console.error(`mug: faction ${fdoc.id} failed:`, e);
       }
