@@ -461,6 +461,7 @@
           <label>Sort</label>
           <select id="mug-sort" onchange="mugRender()">
             <option value="ready">Readiness</option>
+            <option value="payday">Payday pileup</option>
             <option value="bazaar">Forgotten bazaars</option>
             <option value="mug">Biggest mug (jackpot)</option>
             <option value="grinder">Steady earners</option>
@@ -1294,6 +1295,20 @@ function mugBazScore(t,now){
   const idleH=t.lastActionTs?Math.min(24,(now-t.lastActionTs)/3600):0;
   return t.weeklyCustomers*idleH;
 }
+// Company salaries pay daily at 18:00 TCT (= 18:00 UTC). Count how many
+// paydays have passed since a target last acted = unbanked days stacked up.
+function mugPaydaysSince(lastTs,now){
+  if(!lastTs)return 0;
+  const d=new Date(lastTs*1000);
+  let b=Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate(),18,0,0)/1000;
+  if(b<=lastTs)b+=86400;
+  let n=0;while(b<=now){n++;b+=86400}return n;
+}
+function mugSecsToPayday(now){const d=new Date(now*1000);let b=Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate(),18,0,0)/1000;if(b<=now)b+=86400;return b-now}
+function mugPaydayScore(t,now){
+  if(!t.job||t.state!=='Okay')return 0;
+  return Math.min(mugPaydaysSince(t.lastActionTs,now),7);
+}
 // Mug catchability: how often are they actually attackable vs protecting
 // themselves (hospital/travel)? Same idea as war bagging discipline.
 function mugCatch(t){
@@ -1366,6 +1381,7 @@ function mugRowHtml(t,r,now){
       ${(()=>{const c=mugCatch(t);return `<span class="wb-catch ${c.cls}" title="${(c.tip||'').replace(/"/g,'&quot;')}">${c.icon} ${c.label}</span>`})()}
       <span class="mug-money" title="Biggest single mug ever taken off them · net worth">💰 ${flMoney(t.largestMug||0)}<span class="mug-net"> · net ${flMoney(t.networth||0)}</span></span>
       ${t.bazaarOpen?`<span class="mug-baz" title="Open bazaar${t.bazaarName?' — '+t.bazaarName:''} · ${(t.weeklyCustomers||0).toLocaleString()} customers/week">🏪 open · ${wbNum(t.weeklyCustomers||0)}/wk</span>`:''}
+      ${(t.job&&t.state==='Okay'&&mugPaydaysSince(t.lastActionTs,now)>=1)?(()=>{const p=mugPaydaysSince(t.lastActionTs,now);return `<span class="mug-payday" title="Salaried job — paid daily at 18:00 TCT and unbanked while idle. ${p} payday${p>1?'s':''} stacked up.">💵 ~${p} payday${p>1?'s':''} unbanked</span>`})():''}
       ${(()=>{const a=mugArchetype(t);return a?`<span class="mug-arch arch-${a.cls}" title="${a.title}">${a.icon} ${a.label}</span>`:''})()}
       ${(t.scanned&&!isManual)?'<span class="mug-scanned-tag" title="Found by faction scan — not on your watchlist">scanned</span>':''}
     </div>
@@ -1399,7 +1415,7 @@ function mugRender(){
   const ids=new Set(mugTargets.map(String));
   Object.keys(mugStatus).forEach(id=>ids.add(String(id)));
   const nManual=mugTargets.length;
-  document.getElementById('mug-meta-bar').innerHTML=ids.size?`<div class="meta-item">Targets <span class="meta-value">${nManual} watched${ids.size>nManual?' · '+(ids.size-nManual)+' scanned':''}</span></div><div class="meta-item">Updated <span class="meta-value">${mugLastPoll?timeAgo(mugLastPoll):'—'}</span></div>`:'';
+  document.getElementById('mug-meta-bar').innerHTML=`<div class="meta-item">💵 Next payday <span class="meta-value">18:00 TCT · ${formatCountdown(mugSecsToPayday(now))}</span></div>${ids.size?`<div class="meta-item">Targets <span class="meta-value">${nManual} watched${ids.size>nManual?' · '+(ids.size-nManual)+' scanned':''}</span></div><div class="meta-item">Updated <span class="meta-value">${mugLastPoll?timeAgo(mugLastPoll):'—'}</span></div>`:''}`;
   if(!ids.size){
     list.innerHTML=(mugScanFactions.length||mugScanCompanies.length)
       ?'<div class="state-banner"><h3>Scanning…</h3><p>Pulling idle, attackable members. Results appear within a few seconds.</p></div>'
@@ -1419,6 +1435,7 @@ function mugRender(){
   if(extra.length)document.getElementById('mug-meta-bar').insertAdjacentHTML('beforeend',extra.join(''));
   const sort=document.getElementById('mug-sort').value;
   rows.sort((a,b)=>{
+    if(sort==='payday')return mugPaydayScore(b.t,now)-mugPaydayScore(a.t,now);
     if(sort==='bazaar')return mugBazScore(b.t,now)-mugBazScore(a.t,now);
     if(sort==='mug')return(b.t.largestMug||0)-(a.t.largestMug||0);
     if(sort==='grinder')return mugGrinderScore(b.t)-mugGrinderScore(a.t);

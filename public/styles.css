@@ -1580,3 +1580,8 @@ input[type="text"] { width:140px; }
   border-radius:8px;
 }
 .mug-tip b { color:var(--text); font-weight:600; }
+
+.mug-payday {
+  font-size:10px; font-weight:600; padding:2px 7px; border-radius:10px; white-space:nowrap;
+  color:var(--active); border:1px solid rgba(52,211,153,0.45); background:var(--active-bg);
+}
